@@ -43,13 +43,3 @@ export function changedSince(root, commit, file) {
   if (out === null) return false;
   return out.length > 0;
 }
-
-/** Ficheros modificados respecto a HEAD, incluidos los no rastreados. */
-export function dirtyFiles(root) {
-  const out = git(root, ['status', '--porcelain']);
-  if (!out) return [];
-  return out
-    .split('\n')
-    .map((line) => line.slice(3).trim())
-    .filter(Boolean);
-}

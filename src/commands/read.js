@@ -166,5 +166,3 @@ export function cmdStale(args, options) {
   if (!lines.length) lines.push('Todos los hechos verificados siguen al dia.');
   return { output: lines.join('\n'), code: stale.length ? 1 : 0 };
 }
-
-export { paths };

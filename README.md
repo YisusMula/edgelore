@@ -60,8 +60,11 @@ máquina porque no hay nada que pueda salir.
 
 ## Instalación
 
+Todavía no está publicado en npm. Se instala desde el repositorio:
+
 ```bash
-npm install -g nexo-cli     # o: npx nexo-cli
+git clone <url-de-este-repo> nexo && cd nexo && npm install -g .
+
 cd tu-repositorio
 nexo init --rules dotnet-core,dotnet-maui,dotnet-winservice,dotnet-data
 git add .nexo .claude && git commit -m "Añade índice Nexo"

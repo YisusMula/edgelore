@@ -95,10 +95,16 @@ CONFIANZA
 ${Object.entries(CONFIDENCE).map(([key, text]) => `  ${key.padEnd(11)} ${text}`).join('\n')}
 
 OPCIONES COMUNES
-  --json         Salida en JSON para herramientas.
-  --brief        Omite las notas largas en query.
-  --strict       En validate, exige ficha propia para todo id referenciado.
-  --unverified   Al escribir, no sella el hecho como verificado.
+  --json          Salida en JSON para herramientas.
+  --brief         Omite las notas largas en query.
+  --strict        En validate, exige ficha propia para todo id referenciado.
+  --unverified    Al escribir, no sella el hecho como verificado.
+  --confidence X  certain, likely o unverified.
+
+CONFIANZA POR DEFECTO
+  nexo link         certain      es una afirmacion deliberada sobre una relacion
+  nexo add --edge   unverified   se escriben de corrido; confirmalas despues
+  reglas de kind    la que declare la regla (normalmente certain)
 
 EJEMPLOS
   nexo init --rules dotnet-core,dotnet-maui

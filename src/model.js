@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * Esquema de un hecho de Nexo y su validacion.
  *
@@ -48,9 +50,18 @@ export class ValidationError extends Error {
   }
 }
 
-/** Convierte un id de nodo en un nombre de fichero seguro en Windows y Linux. */
+/**
+ * Convierte un id de nodo en un nombre de fichero seguro en Windows y Linux.
+ *
+ * Sanear a secas no basta: `A/B` y `A_B` colapsarian en el mismo fichero y uno
+ * pisaria al otro sin avisar. Cuando el saneado cambia algo se anade un sufijo
+ * derivado del id completo, de modo que la correspondencia sigue siendo
+ * inyectiva y ningun hecho puede sobreescribir a otro.
+ */
 export function idToFilename(id) {
-  return `${id.replace(/[^\w.+-]/g, '_')}.md`;
+  const safe = id.replace(/[^\w.+-]/g, '_');
+  if (safe === id) return `${safe}.md`;
+  return `${safe}-${createHash('sha1').update(id).digest('hex').slice(0, 8)}.md`;
 }
 
 export function isValidId(id) {

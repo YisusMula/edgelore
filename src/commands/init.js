@@ -44,17 +44,15 @@ function writeIfAbsent(target, content, report, { force = false } = {}) {
 }
 
 const CONFIG_TEMPLATE = (rules) => `# Configuracion de Nexo.
+#
 # El indice vive en .nexo/ y se versiona con el repositorio: cada persona del
 # equipo lo amplia durante su trabajo normal y todos consumen el resultado.
+#
+# Las reglas activas son, sencillamente, los ficheros que haya en .nexo/rules/.
+# No hay una lista que mantener aqui: anadir un fichero basta para activarlo.
+# Instaladas por \`nexo init\`: ${rules.join(', ') || '(ninguna)'}.
 
 version: 1
-
-# Reglas de framework activas. Cada una declara los "kind" de nodo que conoce y
-# las aristas implicitas que ese kind implica. Listalos con \`nexo kinds\`.
-rules: [${rules.join(', ')}]
-
-# Prefijo que se recorta al mostrar rutas de fichero. Vacio = rutas completas.
-source_root: ""
 `;
 
 const GITIGNORE_BLOCK = `
@@ -138,7 +136,11 @@ export function cmdInit(args, options) {
  */
 function installHook(root, report, { force }) {
   const file = path.join(root, '.claude', 'settings.json');
-  const hookCommand = 'npx --no-install nexo hook post-edit 2>/dev/null || true';
+  // Invocacion directa y portable: sin redirecciones de shell POSIX, que no
+  // funcionan en cmd.exe, y sin `|| true`, que convertiria un `nexo` ausente en
+  // un hook que no hace nada durante meses sin que nadie lo note. El propio
+  // comando ya sale siempre con codigo 0, asi que no puede bloquear una edicion.
+  const hookCommand = 'nexo hook post-edit';
 
   let settings = {};
   if (fs.existsSync(file)) {

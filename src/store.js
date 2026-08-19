@@ -93,7 +93,12 @@ export function nodePath(root, id) {
 
 export function readNode(root, id) {
   const file = nodePath(root, id);
-  return fs.existsSync(file) ? readNodeFile(file) : null;
+  if (!fs.existsSync(file)) return null;
+  const node = readNodeFile(file);
+  // Defensa en profundidad: si el fichero no declara el id que se pedia, no es
+  // el hecho buscado. Devolver null hace que se cree el correcto en vez de
+  // editar por error el de otro nodo.
+  return node.id === id ? node : null;
 }
 
 /**
@@ -101,10 +106,22 @@ export function readNode(root, id) {
  * aristas entrantes derivadas. Con miles de ficheros pequenos esto tarda
  * milisegundos, asi que no hay ninguna cache que pueda quedarse obsoleta.
  */
+/** Version de formato que entiende esta build del CLI. */
+export const FORMAT_VERSION = 1;
+
 export function loadIndex(root) {
   const nodes = new Map();
   const incoming = new Map();
   const problems = [];
+
+  // Un companero con una version antigua leyendo un indice escrito por una mas
+  // nueva podria interpretar mal los hechos en silencio. Mejor decirlo.
+  const declared = Number(loadConfig(root).version ?? FORMAT_VERSION);
+  if (Number.isFinite(declared) && declared > FORMAT_VERSION) {
+    problems.push(
+      `el indice declara la version de formato ${declared} y este CLI entiende hasta la ${FORMAT_VERSION}; actualiza nexo`,
+    );
+  }
 
   for (const file of listNodeFiles(root)) {
     let node;
@@ -122,6 +139,20 @@ export function loadIndex(root) {
       continue;
     }
     nodes.set(node.id, node);
+  }
+
+  // Windows no distingue mayusculas en los nombres de fichero: dos ids que solo
+  // difieran en el caso conviven en Linux y en CI, pero colapsan en el portatil
+  // de quien desarrolla. Se avisa aqui para que `nexo validate` lo detecte antes
+  // de que alguien pierda un hecho sin enterarse.
+  const byLowercase = new Map();
+  for (const id of nodes.keys()) {
+    const key = id.toLowerCase();
+    if (byLowercase.has(key)) {
+      problems.push(`"${id}" y "${byLowercase.get(key)}" solo se diferencian en mayusculas y colisionarian en Windows`);
+    } else {
+      byLowercase.set(key, id);
+    }
   }
 
   for (const node of nodes.values()) {

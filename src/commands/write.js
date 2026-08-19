@@ -54,11 +54,12 @@ export function cmdAdd(args, options) {
   const existing = readNode(root, id);
   const catalog = kindCatalog(loadRules(root));
 
-  const node = existing
-    ? { ...existing }
-    : { id, edges: [] };
+  const node = existing ? { ...existing } : { id, edges: [] };
   delete node.notes;
   delete node._file;
+  // El id lo manda siempre el argumento, nunca el fichero leido: asi un
+  // fichero que no corresponda al id pedido no se edita por confusion.
+  node.id = id;
 
   if (options.file) node.file = options.file;
   if (options.kind) node.kind = options.kind;
@@ -66,8 +67,16 @@ export function cmdAdd(args, options) {
   if (options.lang) node.lang = options.lang;
   if (options.tag?.length) node.tags = [...(node.tags ?? []), ...options.tag];
 
+  if (options.confidence && !CONFIDENCE[options.confidence]) {
+    throw new Error(`Confianza "${options.confidence}" desconocida.\nValidas: ${Object.keys(CONFIDENCE).join(', ')}`);
+  }
+  // Las aristas de --edge nacen sin verificar salvo que se afirme lo contrario:
+  // se escriben de corrido y marcarlas como comprobadas por defecto seria
+  // exactamente como el indice empieza a mentir.
   const edges = [...(node.edges ?? [])];
-  for (const raw of options.edge ?? []) edges.push(parseEdgeFlag(raw));
+  for (const raw of options.edge ?? []) {
+    edges.push({ ...parseEdgeFlag(raw), confidence: options.confidence ?? 'unverified' });
+  }
 
   // Las aristas implicitas del framework se generan solas: declarar el kind una
   // vez ahorra escribirlas a mano en cada pagina o cada servicio.
@@ -126,6 +135,7 @@ ${Object.entries(EDGE_TYPES).map(([key, help]) => `  ${key.padEnd(11)} ${help}`)
   const node = existing ? { ...existing } : { id: from, edges: [] };
   delete node.notes;
   delete node._file;
+  node.id = from;
 
   const edge = normalizeEdge({
     to,

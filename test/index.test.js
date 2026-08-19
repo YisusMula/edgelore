@@ -6,10 +6,10 @@ import path from 'node:path';
 
 import { loadIndex, writeNode, readNode, findStoreRoot, incomingEdges, danglingIds } from '../src/store.js';
 import { neighbourhood, search, path as findPath, stats, isHiddenEdge } from '../src/query.js';
-import { normalizeNode, validateNode } from '../src/model.js';
+import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, extractPaths } from '../src/commands/hook.js';
-import { parseEdgeFlag } from '../src/commands/write.js';
+import { parseEdgeFlag, cmdAdd } from '../src/commands/write.js';
 import { cmdInit } from '../src/commands/init.js';
 import { parseArgs } from '../bin/nexo.js';
 
@@ -261,4 +261,87 @@ test('extractPaths tolera las distintas formas del payload de Claude Code', () =
   assert.deepEqual(extractPaths({ tool_input: { edits: [{ file_path: 'a.cs' }, { file_path: 'b.cs' }] } }), ['a.cs', 'b.cs']);
   assert.deepEqual(extractPaths({}), []);
   assert.deepEqual(extractPaths(null), []);
+});
+
+test('ids que solo difieren en caracteres no seguros no comparten fichero', () => {
+  // Regresion: `A/B` y `A_B` colapsaban en A_B.md y uno pisaba al otro.
+  const a = idToFilename('Erp/Ventas');
+  const b = idToFilename('Erp_Ventas');
+  assert.notEqual(a, b);
+  assert.equal(idToFilename('Erp.Ventas.PagoService'), 'Erp.Ventas.PagoService.md');
+  assert.equal(idToFilename('Erp/Ventas'), idToFilename('Erp/Ventas'), 'debe ser determinista');
+});
+
+test('dos hechos con ids saneables distintos conviven sin pisarse', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'Erp/Ventas', edges: [] });
+  writeNode(root, { id: 'Erp_Ventas', edges: [] });
+  const index = loadIndex(root);
+  assert.equal(index.nodes.size, 2);
+  assert.ok(index.nodes.has('Erp/Ventas'));
+  assert.ok(index.nodes.has('Erp_Ventas'));
+});
+
+test('readNode no devuelve un hecho cuyo id no coincide con el pedido', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'Correcto', edges: [] });
+  // Se falsea un fichero cuyo contenido declara otro id distinto del nombre.
+  fs.writeFileSync(path.join(root, '.nexo', 'nodes', 'Impostor.md'), '---\nid: Correcto\n---\n');
+  assert.equal(readNode(root, 'Impostor'), null);
+});
+
+test('validate avisa de ids que colisionarian en Windows', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'PagoService', edges: [] });
+  writeNode(root, { id: 'pagoservice', edges: [] });
+  const index = loadIndex(root);
+  assert.ok(index.problems.some((problem) => /mayusculas/.test(problem)));
+});
+
+/** Los comandos resuelven el almacen desde process.cwd(), como haria el CLI. */
+function inSandbox(fn) {
+  const root = sandbox();
+  const previous = process.cwd();
+  process.chdir(root);
+  try {
+    return fn(root);
+  } finally {
+    process.chdir(previous);
+  }
+}
+
+test('las aristas de --edge nacen sin verificar salvo que se afirme lo contrario', () => {
+  inSandbox((root) => {
+    cmdAdd(['Svc'], { edge: ['Tabla:writes'] });
+    assert.equal(readNode(root, 'Svc').edges[0].confidence, 'unverified');
+  });
+});
+
+test('--confidence se aplica a las aristas de --edge y rechaza valores invalidos', () => {
+  inSandbox((root) => {
+    cmdAdd(['Svc'], { edge: ['Tabla:writes'], confidence: 'certain' });
+    assert.equal(readNode(root, 'Svc').edges[0].confidence, 'certain');
+    assert.throws(() => cmdAdd(['Otro'], { edge: ['T:writes'], confidence: 'quiza' }), /desconocida/);
+  });
+});
+
+test('cmdAdd usa siempre el id del argumento, no el del fichero leido', () => {
+  inSandbox((root) => {
+    cmdAdd(['Erp/Ventas'], { edge: ['X:calls'] });
+    cmdAdd(['Erp_Ventas'], { edge: ['Y:calls'] });
+    assert.equal(readNode(root, 'Erp/Ventas').id, 'Erp/Ventas');
+    assert.equal(readNode(root, 'Erp_Ventas').id, 'Erp_Ventas');
+  });
+});
+
+test('avisa si el indice fue escrito por una version de formato mas nueva', () => {
+  const root = sandbox();
+  fs.writeFileSync(path.join(root, '.nexo', 'config.yaml'), 'version: 99\n');
+  assert.ok(loadIndex(root).problems.some((problem) => /version de formato 99/.test(problem)));
+});
+
+test('un config sin version no genera falsos avisos', () => {
+  const root = sandbox();
+  fs.writeFileSync(path.join(root, '.nexo', 'config.yaml'), '# solo un comentario\n');
+  assert.deepEqual(loadIndex(root).problems, []);
 });
