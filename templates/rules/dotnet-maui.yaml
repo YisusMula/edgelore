@@ -1,0 +1,73 @@
+# Reglas de .NET MAUI (y en buena medida Xamarin.Forms).
+#
+# El caso canonico que justifica todo Nexo: OnAppearing no lo llama nadie. Un
+# grep de "OnAppearing" devuelve la declaracion y ninguna llamada, de modo que
+# la pregunta "quien ejecuta esto" no tiene respuesta leyendo el codigo. Aqui se
+# declara una vez y vale para todas las paginas del proyecto.
+
+id: dotnet-maui
+name: .NET MAUI
+
+kinds:
+  maui-page:
+    label: Pagina (ContentPage / Shell page)
+    implicit_edges:
+      - member: ctor
+        type: lifecycle
+        trigger: se construye al navegar hacia la pagina (o al arrancar, si es la raiz del Shell)
+        confidence: certain
+      - member: OnAppearing
+        type: lifecycle
+        trigger: >-
+          el runtime lo invoca CADA VEZ que la pagina se hace visible, incluido
+          al volver atras desde otra pagina; no solo la primera vez
+        confidence: certain
+      - member: OnDisappearing
+        type: lifecycle
+        trigger: >-
+          el runtime lo invoca al dejar de ser visible; no esta garantizado si
+          el sistema operativo mata la aplicacion
+        confidence: certain
+      - member: OnNavigatedTo
+        type: lifecycle
+        trigger: el Shell lo invoca tras completar la navegacion hacia esta pagina
+        confidence: likely
+    checklist:
+      - "Se registra en Routing.RegisterRoute? Anade string-ref desde AppShell hacia esta pagina, con --at fichero:linea."
+      - "Con que ruta se navega hasta aqui (GoToAsync)? Ese literal es invisible a un grep del nombre de la clase."
+      - "Recibe parametros de navegacion por QueryProperty? El nombre del parametro es otro literal magico: registralo."
+      - "Que hace en OnAppearing frente al constructor? Es la causa numero uno de recargas duplicadas."
+      - "Su BindingContext es un ViewModel? Anade una arista calls o reads hacia el."
+
+  maui-viewmodel:
+    label: ViewModel enlazado a una vista
+    implicit_edges:
+      - member: ctor
+        type: lifecycle
+        trigger: lo instancia el contenedor de DI, o la propia pagina en su constructor
+        confidence: likely
+    checklist:
+      - "Que vista lo consume? Si el enlace es por XAML, no hay ninguna llamada que un grep pueda encontrar."
+      - "Que propiedades se enlazan desde el XAML? Cada {Binding X} es una referencia por texto."
+      - "Que comandos expone? El XAML los invoca por nombre, no por llamada."
+      - "Lanza carga de datos en el constructor o en un Initialize? Afecta a cuando se ve el spinner."
+
+  maui-shell-route:
+    label: Ruta registrada en el Shell
+    checklist:
+      - "Que literal exacto se usa? Registralo en el summary: es la unica forma de encontrarlo despues."
+      - "Que pagina resuelve? Arista string-ref hacia la pagina."
+      - "Quien navega hacia esta ruta? Cada GoToAsync con este literal es una arista string-ref entrante."
+
+  maui-handler:
+    label: Handler o efecto de plataforma
+    checklist:
+      - "Sobre que control actua? El registro suele ser por tipo, sin llamada visible."
+      - "En que plataformas esta implementado? Un handler ausente en una plataforma es un fallo silencioso."
+
+  xaml-view:
+    label: Vista XAML
+    checklist:
+      - "Que code-behind tiene (x:Class)? Arista implements o calls hacia esa clase parcial."
+      - "Que manejadores de evento declara (Clicked=, Toggled=)? Se resuelven por nombre en tiempo de ejecucion."
+      - "Que recursos o estilos usa por clave? Otro literal magico que grep no relaciona."

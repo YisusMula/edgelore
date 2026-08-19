@@ -1,0 +1,147 @@
+/**
+ * Acceso al almacen de hechos: `.nexo/` dentro del repositorio de trabajo.
+ *
+ * Un fichero por nodo, a proposito. Un unico fichero grande produciria un
+ * conflicto de merge en practicamente cada pull request, y un indice que da
+ * guerra al equipo deja de rellenarse a las dos semanas.
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { parseFrontmatter, parseYaml, stringifyFrontmatter } from './frontmatter.js';
+import { idToFilename, normalizeNode, validateNode } from './model.js';
+
+export const NEXO_DIR = '.nexo';
+
+export class StoreError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'StoreError';
+  }
+}
+
+/** Busca `.nexo/` hacia arriba desde `start`, como hace git con `.git`. */
+export function findStoreRoot(start = process.cwd()) {
+  let dir = path.resolve(start);
+  for (;;) {
+    if (fs.existsSync(path.join(dir, NEXO_DIR, 'config.yaml'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+export function requireStoreRoot(start = process.cwd()) {
+  const root = findStoreRoot(start);
+  if (!root) {
+    throw new StoreError(
+      'No se ha encontrado ningun indice de Nexo en este repositorio.\n' +
+        'Ejecuta `nexo init` en la raiz del repositorio para crearlo.',
+    );
+  }
+  return root;
+}
+
+export function paths(root) {
+  const base = path.join(root, NEXO_DIR);
+  return {
+    base,
+    config: path.join(base, 'config.yaml'),
+    nodes: path.join(base, 'nodes'),
+    rules: path.join(base, 'rules'),
+  };
+}
+
+/** El config se escribe como YAML plano, sin delimitadores de frontmatter. */
+export function loadConfig(root) {
+  const { config } = paths(root);
+  if (!fs.existsSync(config)) return {};
+  const text = fs.readFileSync(config, 'utf8');
+  const data = text.trimStart().startsWith('---') ? parseFrontmatter(text).data : parseYaml(text);
+  return data ?? {};
+}
+
+export function listNodeFiles(root) {
+  const { nodes } = paths(root);
+  if (!fs.existsSync(nodes)) return [];
+  return fs
+    .readdirSync(nodes)
+    .filter((name) => name.endsWith('.md'))
+    .sort()
+    .map((name) => path.join(nodes, name));
+}
+
+export function readNodeFile(file) {
+  const { data, body } = parseFrontmatter(fs.readFileSync(file, 'utf8'));
+  return { ...normalizeNode(data), notes: body, _file: file };
+}
+
+export function writeNode(root, node, notes = '') {
+  const { nodes } = paths(root);
+  fs.mkdirSync(nodes, { recursive: true });
+  const normalized = normalizeNode(node);
+  const problems = validateNode(normalized, { source: normalized.id ?? 'hecho' });
+  if (problems.length) throw new StoreError(problems.join('\n'));
+  const file = path.join(nodes, idToFilename(normalized.id));
+  fs.writeFileSync(file, stringifyFrontmatter(normalized, notes), 'utf8');
+  return file;
+}
+
+export function nodePath(root, id) {
+  return path.join(paths(root).nodes, idToFilename(id));
+}
+
+export function readNode(root, id) {
+  const file = nodePath(root, id);
+  return fs.existsSync(file) ? readNodeFile(file) : null;
+}
+
+/**
+ * Carga todos los hechos y construye el indice en memoria, incluidas las
+ * aristas entrantes derivadas. Con miles de ficheros pequenos esto tarda
+ * milisegundos, asi que no hay ninguna cache que pueda quedarse obsoleta.
+ */
+export function loadIndex(root) {
+  const nodes = new Map();
+  const incoming = new Map();
+  const problems = [];
+
+  for (const file of listNodeFiles(root)) {
+    let node;
+    try {
+      node = readNodeFile(file);
+    } catch (error) {
+      problems.push(`${path.basename(file)}: ${error.message}`);
+      continue;
+    }
+    const label = path.basename(file);
+    problems.push(...validateNode(node, { source: label }));
+    if (!node.id) continue;
+    if (nodes.has(node.id)) {
+      problems.push(`${label}: el id "${node.id}" ya esta definido en otro fichero`);
+      continue;
+    }
+    nodes.set(node.id, node);
+  }
+
+  for (const node of nodes.values()) {
+    for (const edge of node.edges ?? []) {
+      if (!incoming.has(edge.to)) incoming.set(edge.to, []);
+      incoming.get(edge.to).push({ ...edge, from: node.id });
+    }
+  }
+
+  return { root, nodes, incoming, problems };
+}
+
+/** Aristas entrantes de un id, ordenadas de forma estable. */
+export function incomingEdges(index, id) {
+  return [...(index.incoming.get(id) ?? [])].sort(
+    (a, b) => a.from.localeCompare(b.from) || a.type.localeCompare(b.type),
+  );
+}
+
+/** Ids referenciados por alguna arista pero que aun no tienen fichero propio. */
+export function danglingIds(index) {
+  return [...index.incoming.keys()].filter((id) => !index.nodes.has(id)).sort();
+}

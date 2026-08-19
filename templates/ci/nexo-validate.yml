@@ -1,0 +1,26 @@
+# Copia este fichero a .github/workflows/ en el repositorio donde uses Nexo.
+#
+# Es la unica defensa automatica contra que el indice acumule mentiras: valida
+# que los ficheros referenciados existen y que el esquema es correcto. No puede
+# saber si un hecho es falso, pero si que ha dejado de ser coherente.
+
+name: nexo
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # nexo stale necesita el historial
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npx --yes nexo-cli validate
+      # Informativo: no bloquea el merge, pero deja visible lo que hay por revisar.
+      - run: npx --yes nexo-cli stale || true
