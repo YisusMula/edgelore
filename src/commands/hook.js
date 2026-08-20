@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { findStoreRoot, loadIndex } from '../store.js';
+import { impact, renderImpact } from '../query.js';
 import { changedSince, isGitRepo } from '../git.js';
 
 const MAX_SUGGESTIONS = 6;
@@ -82,9 +83,42 @@ export function buildNotice(root, index, files, { git = false } = {}) {
   return lines.join('\n');
 }
 
+/**
+ * Aviso PREVIO a una edicion: el alcance de lo que se va a tocar.
+ *
+ * Es la mitad que faltaba. El aviso posterior sirve para registrar lo
+ * descubierto, pero llega tarde para la pregunta que de verdad importa antes de
+ * cambiar algo: quien depende de esto. Sin esto, acordarse de consultar el
+ * indice queda en manos de quien escribe el prompt, y eso es justo lo que se
+ * olvida cuando hay prisa.
+ */
+export function buildImpactNotice(root, index, files, { maxDepth = 3 } = {}) {
+  const tracked = files
+    .map((file) => path.relative(root, path.resolve(root, file)).split(path.sep).join('/'))
+    .filter((file) => !file.startsWith('..') && !file.startsWith('.edgelore/'));
+  if (!tracked.length || index.nodes.size === 0) return null;
+
+  const affected = [];
+  for (const node of index.nodes.values()) {
+    if (!node.file || !tracked.includes(node.file)) continue;
+    const result = impact(index, node.id, { maxDepth });
+    if (result.affected > 0) affected.push(result);
+  }
+  if (!affected.length) return null;
+
+  const lines = ['Edgelore: lo que vas a editar tiene dependencias registradas.'];
+  for (const result of affected.slice(0, 3)) {
+    lines.push('', renderImpact(result, index));
+  }
+  if (affected.length > 3) {
+    lines.push('', `... y ${affected.length - 3} nodo(s) mas en este fichero. Consulta: edgelore impact <id>`);
+  }
+  return lines.join('\n');
+}
+
 export function cmdHook(args) {
   const event = args[0] ?? 'post-edit';
-  if (event !== 'post-edit') {
+  if (event !== 'post-edit' && event !== 'pre-edit') {
     return { output: `Evento de hook desconocido: ${event}`, code: 0 };
   }
 
@@ -107,13 +141,20 @@ export function cmdHook(args) {
     if (!files.length) return { output: '' };
 
     const index = loadIndex(root);
-    const notice = buildNotice(root, index, files, { git: isGitRepo(root) });
+    const notice =
+      event === 'pre-edit'
+        ? buildImpactNotice(root, index, files)
+        : buildNotice(root, index, files, { git: isGitRepo(root) });
     if (!notice) return { output: '' };
 
     // additionalContext hace que el aviso llegue al agente, no solo al log.
+    // Nunca se emite permissionDecision: el hook informa, jamas bloquea.
     return {
       output: JSON.stringify({
-        hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: notice },
+        hookSpecificOutput: {
+          hookEventName: event === 'pre-edit' ? 'PreToolUse' : 'PostToolUse',
+          additionalContext: notice,
+        },
       }),
     };
   } catch {

@@ -9,16 +9,16 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cmdQuery, cmdFind, cmdPath, cmdStats, cmdKinds, cmdChecklist, cmdValidate, cmdStale } from '../src/commands/read.js';
+import { cmdQuery, cmdImpact, cmdFind, cmdPath, cmdStats, cmdKinds, cmdChecklist, cmdValidate, cmdStale } from '../src/commands/read.js';
 import { cmdAdd, cmdLink, cmdVerify, cmdRemove } from '../src/commands/write.js';
-import { cmdInit, availableRuleSets } from '../src/commands/init.js';
+import { cmdInit, cmdUninstall, availableRuleSets } from '../src/commands/init.js';
 import { cmdHook } from '../src/commands/hook.js';
 import { EDGE_TYPES, CONFIDENCE } from '../src/model.js';
 
 const VERSION = '0.1.0';
 
 /** Banderas que aceptan valor; el resto son booleanas. Repetibles marcadas aparte. */
-const VALUE_FLAGS = new Set(['file', 'kind', 'summary', 'lang', 'note', 'trigger', 'at', 'confidence', 'dir', 'limit']);
+const VALUE_FLAGS = new Set(['file', 'kind', 'summary', 'lang', 'note', 'trigger', 'at', 'confidence', 'dir', 'limit', 'depth']);
 const LIST_FLAGS = new Set(['edge', 'tag', 'rules']);
 
 export function parseArgs(argv) {
@@ -49,7 +49,7 @@ export function parseArgs(argv) {
       // `--rules a,b` y `--rules a --rules b` son equivalentes.
       options[name].push(...String(value).split(',').map((part) => part.trim()).filter(Boolean));
     } else if (VALUE_FLAGS.has(name)) {
-      options[name] = name === 'limit' ? Number(value) : value;
+      options[name] = name === 'limit' || name === 'depth' ? Number(value) : value;
     } else {
       options[name] = true;
     }
@@ -58,10 +58,12 @@ export function parseArgs(argv) {
 }
 
 const COMMANDS = {
-  init: { run: cmdInit, help: 'Prepara el repositorio actual: .edgelore/, reglas, skill y hook.' },
+  init: { run: cmdInit, help: 'Prepara el repositorio actual: .edgelore/, reglas, skill y hooks.' },
+  uninstall: { run: cmdUninstall, help: 'Retira skill y hooks. Con --all borra tambien los hechos.' },
   add: { run: cmdAdd, help: 'Registra o actualiza un hecho.' },
   link: { run: cmdLink, help: 'Anade una arista entre dos nodos.' },
   query: { run: cmdQuery, help: 'Muestra un nodo con sus aristas salientes y entrantes.' },
+  impact: { run: cmdImpact, help: 'Que se rompe si cambias esto. Transitivo. Usalo ANTES de editar.' },
   find: { run: cmdFind, help: 'Busca hechos por texto.' },
   path: { run: cmdPath, help: 'Camino mas corto conocido entre dos nodos.' },
   verify: { run: cmdVerify, help: 'Sella un hecho como comprobado en el commit actual.' },
@@ -111,6 +113,7 @@ EJEMPLOS
   edgelore add Erp.Ventas.PagoService --file src/Ventas/PagoService.cs --kind service
   edgelore link AppShell Erp.Ui.DetallePage string-ref --at AppShell.xaml.cs:42 \\
     --note 'registrada como ruta "detalle"'
+  edgelore impact Erp.Ui.DetallePage.OnAppearing   # antes de tocarlo
   edgelore query Erp.Ui.DetallePage
   edgelore path AppShell Erp.Data.FacturaRepository
 

@@ -55,10 +55,18 @@ const CONFIG_TEMPLATE = (rules) => `# Configuracion de Edgelore.
 version: 1
 `;
 
-const GITIGNORE_BLOCK = `
-# Edgelore: los hechos SI se versionan; los artefactos derivados no.
-.edgelore/cache/
-`;
+/**
+ * Comandos de hook que se registran en .claude/settings.json.
+ *
+ * Invocacion directa y portable: sin redirecciones de shell POSIX, que no
+ * funcionan en cmd.exe, y sin `|| true`, que convertiria un `edgelore` ausente
+ * en un hook que no hace nada durante meses sin que nadie lo note. El comando
+ * ya sale siempre con codigo 0, asi que no puede bloquear una edicion.
+ */
+const HOOKS = [
+  { matcher: 'Edit|Write|MultiEdit', event: 'PreToolUse', command: 'edgelore hook pre-edit' },
+  { matcher: 'Edit|Write|MultiEdit', event: 'PostToolUse', command: 'edgelore hook post-edit' },
+];
 
 export function cmdInit(args, options) {
   const root = path.resolve(options.dir ?? process.cwd());
@@ -98,19 +106,11 @@ export function cmdInit(args, options) {
       report,
       { force },
     );
-    installHook(root, report, { force });
+    installHook(root, report);
   }
 
-  const gitignore = path.join(root, '.gitignore');
-  if (fs.existsSync(gitignore)) {
-    const current = fs.readFileSync(gitignore, 'utf8');
-    if (!current.includes('.edgelore/cache/')) {
-      fs.appendFileSync(gitignore, GITIGNORE_BLOCK, 'utf8');
-      report.written.push(gitignore);
-    }
-  } else {
-    writeIfAbsent(gitignore, GITIGNORE_BLOCK.trimStart(), report, { force });
-  }
+  // No se toca .gitignore: todo lo que Edgelore escribe se versiona a
+  // proposito, y no genera ningun artefacto derivado que ignorar.
 
   const lines = [`Edgelore instalado en ${root}`, ''];
   report.written.forEach((file) => lines.push(`  creado   ${path.relative(root, file)}`));
@@ -131,44 +131,133 @@ export function cmdInit(args, options) {
 }
 
 /**
- * Registra el hook PostToolUse en .claude/settings.json preservando lo que ya
- * hubiera. Nunca sobreescribe la configuracion existente del equipo.
+ * Borra directorios que se han quedado vacios, subiendo hasta `stop`.
+ *
+ * Git no rastrea directorios vacios, asi que un `git status` limpio no prueba
+ * que no quede rastro en disco. Desinstalar tiene que dejar el arbol como
+ * estaba, no solo como git lo ve.
  */
-function installHook(root, report, { force }) {
-  const file = path.join(root, '.claude', 'settings.json');
-  // Invocacion directa y portable: sin redirecciones de shell POSIX, que no
-  // funcionan en cmd.exe, y sin `|| true`, que convertiria un `edgelore` ausente en
-  // un hook que no hace nada durante meses sin que nadie lo note. El propio
-  // comando ya sale siempre con codigo 0, asi que no puede bloquear una edicion.
-  const hookCommand = 'edgelore hook post-edit';
+function pruneEmptyDirs(dir, stop) {
+  let current = path.resolve(dir);
+  const limit = path.resolve(stop);
+  while (current.startsWith(limit) && current !== limit) {
+    if (!fs.existsSync(current) || fs.readdirSync(current).length > 0) return;
+    fs.rmdirSync(current);
+    current = path.dirname(current);
+  }
+}
 
-  let settings = {};
-  if (fs.existsSync(file)) {
-    try {
-      settings = JSON.parse(fs.readFileSync(file, 'utf8'));
-    } catch {
-      report.skipped.push(`${file} (no es JSON valido; hook no instalado)`);
-      return;
-    }
+function readSettings(file) {
+  if (!fs.existsSync(file)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Registra los hooks en .claude/settings.json preservando lo que ya hubiera.
+ * Nunca sobreescribe la configuracion existente del equipo.
+ */
+function installHook(root, report) {
+  const file = path.join(root, '.claude', 'settings.json');
+  const settings = readSettings(file);
+  if (settings === null) {
+    report.skipped.push(`${file} (no es JSON valido; hooks no instalados)`);
+    return;
   }
 
   settings.hooks ??= {};
-  settings.hooks.PostToolUse ??= [];
-  const already = settings.hooks.PostToolUse.some((entry) =>
-    (entry.hooks ?? []).some((hook) => typeof hook.command === 'string' && hook.command.includes('edgelore hook')),
-  );
-  if (already && !force) {
+  let changed = false;
+  for (const { matcher, event, command } of HOOKS) {
+    settings.hooks[event] ??= [];
+    const already = settings.hooks[event].some((entry) =>
+      (entry.hooks ?? []).some((hook) => hook.command === command),
+    );
+    if (already) continue;
+    settings.hooks[event].push({ matcher, hooks: [{ type: 'command', command }] });
+    changed = true;
+  }
+
+  if (!changed) {
     report.skipped.push(file);
     return;
   }
-  if (!already) {
-    settings.hooks.PostToolUse.push({
-      matcher: 'Edit|Write|MultiEdit',
-      hooks: [{ type: 'command', command: hookCommand }],
-    });
-  }
-
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
   report.written.push(file);
+}
+
+/**
+ * `uninstall`: revierte lo que init dejo fuera de .edgelore/.
+ *
+ * Existe porque la huella de la herramienta no cabe entera en un solo
+ * directorio: los hooks viven en un fichero de configuracion compartido con el
+ * resto del equipo, asi que borrar .edgelore/ a mano los dejaria apuntando a un
+ * indice inexistente. Quitar algo debe ser tan facil como ponerlo.
+ */
+export function cmdUninstall(args, options) {
+  const root = path.resolve(options.dir ?? findStoreRoot() ?? process.cwd());
+  const removed = [];
+  const kept = [];
+
+  const skill = path.join(root, '.claude', 'skills', 'edgelore');
+  if (fs.existsSync(skill)) {
+    fs.rmSync(skill, { recursive: true, force: true });
+    pruneEmptyDirs(path.dirname(skill), root);
+    removed.push(path.relative(root, skill));
+  }
+
+  const file = path.join(root, '.claude', 'settings.json');
+  const settings = readSettings(file);
+  if (settings === null) {
+    kept.push(`${path.relative(root, file)} (no es JSON valido; revisa los hooks a mano)`);
+  } else if (settings.hooks) {
+    let changed = false;
+    for (const event of Object.keys(settings.hooks)) {
+      const before = settings.hooks[event]?.length ?? 0;
+      settings.hooks[event] = (settings.hooks[event] ?? [])
+        .map((entry) => ({
+          ...entry,
+          hooks: (entry.hooks ?? []).filter(
+            (hook) => !(typeof hook.command === 'string' && hook.command.includes('edgelore hook')),
+          ),
+        }))
+        // Se descarta la entrada solo si se queda sin comandos: puede compartir
+        // matcher con hooks de otra herramienta que no son nuestros.
+        .filter((entry) => (entry.hooks ?? []).length > 0);
+      if (settings.hooks[event].length === 0) delete settings.hooks[event];
+      if (before !== (settings.hooks[event]?.length ?? 0)) changed = true;
+    }
+    if (Object.keys(settings.hooks).length === 0) delete settings.hooks;
+    if (changed) {
+      // Si el fichero se queda sin nada, se borra: lo habiamos creado nosotros y
+      // dejar un `{}` huerfano no es desinstalar del todo.
+      if (Object.keys(settings).length === 0) {
+        fs.rmSync(file, { force: true });
+        removed.push(path.relative(root, file));
+        pruneEmptyDirs(path.dirname(file), root);
+      } else {
+        fs.writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
+        removed.push(`hooks de edgelore en ${path.relative(root, file)}`);
+      }
+    }
+  }
+
+  const store = path.join(root, EDGELORE_DIR);
+  if (options.all && fs.existsSync(store)) {
+    fs.rmSync(store, { recursive: true, force: true });
+    removed.push(`${EDGELORE_DIR}/ y todos los hechos registrados`);
+  } else if (fs.existsSync(store)) {
+    kept.push(`${EDGELORE_DIR}/ (los hechos del equipo; borralo con --all si de verdad quieres perderlos)`);
+  }
+
+  const lines = removed.length ? ['Eliminado:'] : ['No habia nada que desinstalar.'];
+  removed.forEach((item) => lines.push(`  ${item}`));
+  if (kept.length) {
+    lines.push('', 'Conservado:');
+    kept.forEach((item) => lines.push(`  ${item}`));
+  }
+  return { output: lines.join('\n') };
 }

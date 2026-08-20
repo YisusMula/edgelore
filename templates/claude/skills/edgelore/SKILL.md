@@ -4,9 +4,12 @@ description: >-
   Indice curado de referencias ocultas de este repositorio: relaciones que grep no
   puede encontrar (lifecycle como OnAppearing u OnStart, rutas y reflexion por
   literal de texto, eventos, claves de configuracion, escrituras en base de datos).
-  Usalo ANTES de explorar el codigo para responder "quien llama a esto", "quien
-  ejecuta esto", "que se rompe si cambio esto" o "como llega X hasta Y", y DESPUES
-  de investigar o de modificar codigo para registrar lo que hayas descubierto.
+  USALO SIEMPRE ANTES DE MODIFICAR cualquier funcion, metodo de ciclo de vida,
+  regla de negocio o tabla, para saber que alcance tiene el cambio: peticiones
+  como "cambia X", "modifica X", "refactoriza X" o "comprueba que no rompa nada"
+  exigen ejecutar `edgelore impact` primero. Usalo tambien para responder "quien
+  llama a esto", "quien ejecuta esto" o "como llega X hasta Y", y DESPUES de
+  investigar o modificar codigo para registrar lo que hayas descubierto.
 ---
 
 # Edgelore: consulta antes de buscar, registra despues de descubrir
@@ -15,11 +18,33 @@ Este repositorio mantiene un indice de hechos en `.edgelore/`, versionado con gi
 construido poco a poco por el equipo. Contiene lo que el codigo no dice de si
 mismo.
 
+## Antes de MODIFICAR algo: `impact`
+
+**Regla dura: antes de editar una funcion, un metodo de ciclo de vida, una
+regla de negocio o una tabla, ejecuta `edgelore impact` sobre ella.** Aplica
+siempre, incluso cuando nadie lo pida explicitamente. Si el usuario dice
+"comprueba que no rompa nada", "cambia esto", "modifica X" o "refactoriza",
+esto es lo primero que haces.
+
+```
+edgelore impact <Id>             # que depende de esto, de forma transitiva
+edgelore impact <Id> --depth 6   # ampliar el radio
+```
+
+Devuelve las dependencias por niveles y marca `<- OCULTA A GREP` las que
+ninguna busqueda de texto habria encontrado. Esas son las que se olvidan y las
+que rompen cosas.
+
+Al terminar, **enumera al usuario lo que has comprobado y lo que no**. El
+indice cubre lo que el equipo ha registrado, no todo lo que existe: nunca
+afirmes "no rompe nada" a secas. Di "segun el indice, esto afecta a A, B y C;
+he comprobado los tres" y, si la cobertura es escasa, dilo.
+
 ## Antes de explorar: consulta
 
-Cuando te pregunten quien usa algo, quien lo ejecuta, o que se rompe al
-cambiarlo, **consulta el indice primero**. Cuesta unos cientos de tokens y a
-menudo responde de golpe lo que costaria diez busquedas:
+Cuando te pregunten quien usa algo o quien lo ejecuta, **consulta el indice
+primero**. Cuesta unos cientos de tokens y a menudo responde de golpe lo que
+costaria diez busquedas:
 
 ```
 edgelore query <Id>              # el nodo, lo que sale de el y lo que apunta hacia el

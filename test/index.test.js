@@ -5,12 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { loadIndex, writeNode, readNode, findStoreRoot, incomingEdges, danglingIds } from '../src/store.js';
-import { neighbourhood, search, path as findPath, stats, isHiddenEdge } from '../src/query.js';
+import { neighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact } from '../src/query.js';
 import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
-import { buildNotice, extractPaths } from '../src/commands/hook.js';
+import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
 import { parseEdgeFlag, cmdAdd } from '../src/commands/write.js';
-import { cmdInit } from '../src/commands/init.js';
+import { cmdInit, cmdUninstall } from '../src/commands/init.js';
 import { parseArgs } from '../bin/edgelore.js';
 
 /** Repositorio temporal con Edgelore instalado, para pruebas aisladas. */
@@ -344,4 +344,135 @@ test('un config sin version no genera falsos avisos', () => {
   const root = sandbox();
   fs.writeFileSync(path.join(root, '.edgelore', 'config.yaml'), '# solo un comentario\n');
   assert.deepEqual(loadIndex(root).problems, []);
+});
+
+/** Cadena tipica: ruta por literal -> pagina -> lifecycle -> tabla. */
+function chainSandbox() {
+  const root = sandbox();
+  writeNode(root, { id: 'AppShell', edges: [{ to: 'Pagina', type: 'string-ref', at: 'AppShell.cs:42' }] });
+  writeNode(root, {
+    id: 'Pagina',
+    edges: [{ to: 'Pagina.OnAppearing', type: 'lifecycle', trigger: 'al hacerse visible' }],
+  });
+  writeNode(root, { id: 'Pagina.OnAppearing', file: 'src/Pagina.cs', edges: [{ to: 'Facturas', type: 'reads' }] });
+  return root;
+}
+
+test('impact recorre las dependencias de forma transitiva', () => {
+  const index = loadIndex(chainSandbox());
+  const result = impact(index, 'Facturas');
+  assert.equal(result.affected, 3, 'OnAppearing, Pagina y AppShell dependen de la tabla');
+  assert.equal(result.levels[0].entries[0].id, 'Pagina.OnAppearing');
+  assert.equal(result.levels[1].entries[0].id, 'Pagina');
+  assert.equal(result.levels[2].entries[0].id, 'AppShell');
+});
+
+test('impact cuenta aparte las dependencias que grep no encontraria', () => {
+  const result = impact(loadIndex(chainSandbox()), 'Facturas');
+  // lifecycle y string-ref son invisibles a grep; reads no cuenta como oculta.
+  assert.equal(result.hidden, 2);
+});
+
+test('impact respeta el limite de profundidad y avisa de que hay mas', () => {
+  const result = impact(loadIndex(chainSandbox()), 'Facturas', { maxDepth: 1 });
+  assert.equal(result.affected, 1);
+  assert.equal(result.truncated, true);
+});
+
+test('impact no se cuelga con ciclos', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'A', edges: [{ to: 'B', type: 'calls' }] });
+  writeNode(root, { id: 'B', edges: [{ to: 'A', type: 'calls' }] });
+  const result = impact(loadIndex(root), 'A');
+  assert.equal(result.affected, 1);
+});
+
+test('impact distingue un nodo sin dependientes de uno desconocido', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'Solo', edges: [] });
+  assert.equal(impact(loadIndex(root), 'Solo').known, true);
+  assert.equal(impact(loadIndex(root), 'NoExiste').known, false);
+});
+
+test('la salida de impact nunca promete cobertura completa', () => {
+  const index = loadIndex(chainSandbox());
+  const texto = renderImpact(impact(index, 'Facturas'), index);
+  assert.match(texto, /OCULTA A GREP/);
+  assert.match(texto, /no todo lo que existe/);
+});
+
+test('el hook previo avisa del alcance antes de editar', () => {
+  const root = chainSandbox();
+  const notice = buildImpactNotice(root, loadIndex(root), [path.join(root, 'src/Pagina.cs')]);
+  assert.match(notice, /ALCANCE DE Pagina.OnAppearing/);
+  assert.match(notice, /Pagina/);
+});
+
+test('el hook previo calla cuando no hay nada que dependa del fichero', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'Aislado', file: 'src/a.cs', edges: [] });
+  assert.equal(buildImpactNotice(root, loadIndex(root), [path.join(root, 'src/a.cs')]), null);
+});
+
+/** Sandbox CON la integracion de Claude instalada (skill + hooks). */
+function claudeSandbox() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'edgelore-test-'));
+  cmdInit([], { dir: root, rules: ['dotnet-core'] });
+  return root;
+}
+
+test('init registra los hooks previo y posterior sin tocar .gitignore', () => {
+  const root = claudeSandbox();
+  const settings = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+  assert.equal(settings.hooks.PreToolUse.length, 1);
+  assert.equal(settings.hooks.PostToolUse.length, 1);
+  assert.equal(fs.existsSync(path.join(root, '.gitignore')), false, 'no debe crear .gitignore');
+});
+
+test('init preserva los hooks de otras herramientas', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'edgelore-test-'));
+  const file = path.join(root, '.claude', 'settings.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({
+    permissions: { allow: ['Bash(npm test)'] },
+    hooks: { PostToolUse: [{ matcher: 'Edit', hooks: [{ type: 'command', command: 'prettier --write' }] }] },
+  }));
+  cmdInit([], { dir: root, rules: ['dotnet-core'] });
+
+  const settings = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(settings.permissions.allow, ['Bash(npm test)']);
+  assert.equal(settings.hooks.PostToolUse.length, 2, 'conserva el hook ajeno y anade el propio');
+});
+
+test('uninstall retira skill y hooks pero conserva los hechos', () => {
+  const root = claudeSandbox();
+  writeNode(root, { id: 'A', edges: [] });
+  cmdUninstall([], { dir: root });
+
+  assert.equal(fs.existsSync(path.join(root, '.claude', 'skills', 'edgelore')), false);
+  // El settings.json lo habiamos creado nosotros y se queda vacio: debe irse.
+  assert.equal(fs.existsSync(path.join(root, '.claude', 'settings.json')), false);
+  assert.equal(fs.existsSync(path.join(root, '.claude')), false, 'sin rastro fuera de .edgelore/');
+  assert.ok(fs.existsSync(path.join(root, '.edgelore', 'nodes')), 'los hechos se conservan sin --all');
+});
+
+test('uninstall no toca los hooks de otras herramientas', () => {
+  const root = claudeSandbox();
+  const file = path.join(root, '.claude', 'settings.json');
+  const settings = JSON.parse(fs.readFileSync(file, 'utf8'));
+  settings.hooks.PostToolUse.push({ matcher: 'Edit', hooks: [{ type: 'command', command: 'prettier --write' }] });
+  fs.writeFileSync(file, JSON.stringify(settings));
+
+  cmdUninstall([], { dir: root });
+  const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.equal(after.hooks.PostToolUse.length, 1);
+  assert.equal(after.hooks.PostToolUse[0].hooks[0].command, 'prettier --write');
+  assert.equal(after.hooks.PreToolUse, undefined);
+});
+
+test('uninstall --all borra tambien el almacen', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'A', edges: [] });
+  cmdUninstall([], { dir: root, all: true });
+  assert.equal(fs.existsSync(path.join(root, '.edgelore')), false);
 });

@@ -23,6 +23,8 @@ import {
   renderPath,
   stats,
   renderStats,
+  impact,
+  renderImpact,
 } from '../query.js';
 import { loadRules, kindCatalog, renderKinds, checklistFor, renderChecklist } from '../rules.js';
 import { changedSince, isGitRepo, lastCommitFor } from '../git.js';
@@ -47,6 +49,33 @@ export function cmdQuery(args, options) {
 
   if (options.json) return { output: JSON.stringify(result, null, 2) };
   return { output: renderNeighbourhood(result, { notes: !options.brief }) };
+}
+
+/**
+ * `impact` responde a "que se rompe si cambio esto". Es el comando que se usa
+ * ANTES de tocar codigo, y el unico que recorre las dependencias de forma
+ * transitiva: un cambio no solo afecta a quien te llama, sino a quien llama a
+ * quien te llama.
+ */
+export function cmdImpact(args, options) {
+  const id = args[0];
+  if (!id) throw new Error('Uso: edgelore impact <id> [--depth N]');
+  const index = loadIndex(requireStoreRoot());
+  const depth = Number.isFinite(options.depth) && options.depth > 0 ? options.depth : 4;
+  const result = impact(index, id, { maxDepth: depth });
+
+  if (options.json) return { output: JSON.stringify(result, null, 2) };
+  if (!result.known && result.affected === 0) {
+    const hits = search(index, id, { limit: 5 });
+    const lines = [`"${id}" no aparece en el indice, ni con ficha propia ni referenciado.`];
+    if (hits.length) {
+      lines.push('', 'Quiza te refieres a:');
+      hits.forEach((hit) => lines.push(`  ${hit.id}`));
+    }
+    lines.push('', 'Sin datos no se puede acotar el alcance: usa grep y registra lo que descubras.');
+    return { output: lines.join('\n'), code: 1 };
+  }
+  return { output: renderImpact(result, index) };
 }
 
 export function cmdFind(args, options) {

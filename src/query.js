@@ -159,6 +159,116 @@ export function renderPath(steps, fromId, toId) {
   return lines.join('\n');
 }
 
+/**
+ * Alcance de un cambio: todo lo que depende del nodo, directa o indirectamente.
+ *
+ * Es la pregunta real antes de tocar algo -"que se rompe si cambio esto"- y no
+ * la contesta ni `query`, que solo ve vecinos directos, ni `path`, que exige
+ * conocer el destino de antemano. Se recorre hacia atras porque lo que importa
+ * es quien depende de ti, no de quien dependes tu.
+ */
+export function impact(index, id, { maxDepth = 4 } = {}) {
+  const levels = [];
+  const reached = new Set([id]);
+  const recorded = new Set();
+  let frontier = [id];
+
+  for (let depth = 1; depth <= maxDepth && frontier.length; depth += 1) {
+    const next = [];
+    const entries = [];
+
+    for (const current of frontier) {
+      for (const edge of incomingEdges(index, current)) {
+        // Se registra la arista aunque el nodo ya se haya alcanzado por otra
+        // via: dos caminos distintos hacia el mismo sitio son dos motivos
+        // distintos por los que un cambio puede romperlo.
+        const key = `${edge.from}|${current}|${edge.type}`;
+        if (!recorded.has(key)) {
+          recorded.add(key);
+          entries.push({
+            id: edge.from,
+            via: current === id ? null : current,
+            type: edge.type,
+            trigger: edge.trigger,
+            at: edge.at,
+            note: edge.note,
+            confidence: edge.confidence ?? 'unverified',
+            hidden: isHiddenEdge(edge),
+          });
+        }
+        if (!reached.has(edge.from)) {
+          reached.add(edge.from);
+          next.push(edge.from);
+        }
+      }
+    }
+
+    if (entries.length) {
+      entries.sort((a, b) => Number(b.hidden) - Number(a.hidden) || a.id.localeCompare(b.id));
+      levels.push({ depth, entries });
+    }
+    frontier = next;
+  }
+
+  const hidden = levels.reduce((total, level) => total + level.entries.filter((e) => e.hidden).length, 0);
+  return { id, levels, affected: reached.size - 1, hidden, truncated: frontier.length > 0, known: index.nodes.has(id) };
+}
+
+export function renderImpact(result, index) {
+  const lines = [`ALCANCE DE ${result.id}`];
+
+  if (!result.known) {
+    lines.push('  Este nodo no tiene ficha propia en el indice.');
+  }
+  if (result.affected === 0) {
+    lines.push('', 'Nada registrado depende de el.');
+    lines.push('');
+    lines.push(coverageWarning(index));
+    return lines.join('\n');
+  }
+
+  lines.push(
+    `  ${result.affected} nodo(s) dependen de el` +
+      (result.hidden ? `, ${result.hidden} por relaciones que grep NO encuentra` : ''),
+  );
+
+  for (const level of result.levels) {
+    lines.push('', level.depth === 1 ? 'DEPENDEN DIRECTAMENTE:' : `A ${level.depth} SALTOS:`);
+    for (const entry of level.entries) {
+      const mark = entry.hidden ? ' <- OCULTA A GREP' : '';
+      const doubt = entry.confidence === 'certain' ? '' : ` ~${entry.confidence}`;
+      lines.push(`  ${entry.type.padEnd(11)} ${entry.id}${mark}${doubt}`);
+      const detail = [];
+      if (entry.via) detail.push(`a traves de ${entry.via}`);
+      if (entry.trigger) detail.push(entry.trigger);
+      if (entry.at) detail.push(`en ${entry.at}`);
+      if (entry.note) detail.push(entry.note);
+      if (detail.length) lines.push(`${' '.repeat(14)}${detail.join(' | ')}`);
+    }
+  }
+
+  if (result.truncated) {
+    lines.push('', `Hay mas dependencias mas alla de la profundidad consultada. Usa --depth para ampliar.`);
+  }
+  lines.push('', coverageWarning(index));
+  return lines.join('\n');
+}
+
+/**
+ * Nunca se devuelve un alcance sin este aviso. Un indice curado solo conoce lo
+ * que alguien registro, y presentar su respuesta como una garantia de que nada
+ * se rompe seria justo la clase de mentira que este proyecto existe para
+ * evitar.
+ */
+function coverageWarning(index) {
+  const summary = stats(index);
+  return (
+    `El indice conoce ${summary.nodes} nodo(s) y ${summary.edges} arista(s). ` +
+    'Cubre lo que el equipo ha registrado, no todo lo que existe: ' +
+    'complementa esta respuesta con grep para las llamadas explicitas.'
+  );
+}
+
 export function stats(index) {
   const byType = {};
   const bySource = {};

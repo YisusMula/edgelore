@@ -74,12 +74,20 @@ git add .edgelore .claude && git commit -m "Añade índice Edgelore"
 Una vez publicado, `npm install -g edgelore`.
 
 `edgelore init` instala el almacén de hechos, las reglas del stack elegido, una
-skill de Claude Code y un hook `PostToolUse`. Requiere Node 20 o superior y
-nada más.
+skill de Claude Code y dos hooks. Requiere Node 20 o superior y nada más.
+
+**Para quitarlo:** `edgelore uninstall` retira la skill y los hooks y deja el
+repositorio como estaba; los hechos se conservan salvo que pases `--all`. No se
+toca `.gitignore` ni ningún otro fichero: Edgelore no genera artefactos
+derivados que haya que ignorar.
 
 ## Uso diario
 
 ```bash
+# ANTES de modificar algo: qué se rompe (transitivo)
+edgelore impact Erp.Ui.DetallePage.OnAppearing
+edgelore impact Facturas --depth 6
+
 # consultar (antes de explorar el código)
 edgelore query Erp.Ventas.PagoService     # nodo, aristas salientes y entrantes
 edgelore find factura                     # cuando no sabes el id exacto
@@ -117,9 +125,14 @@ Aristas añadidas por la regla del kind "maui-page":
 Cuarenta páginas, cuarenta veces, sin escribir una sola arista a mano. Las
 reglas se declaran una vez en `.edgelore/rules/*.yaml` y se versionan con el repo.
 
-El hook cierra el círculo: cuando alguien edita un fichero que ya tiene hechos
-registrados, Claude recibe un aviso con lo que hay y con qué confirmar. El
-momento en que registrar un hallazgo es barato es justo después de descubrirlo.
+Los dos hooks cierran el círculo sin depender de que nadie se acuerde:
+
+- **Antes de editar** (`PreToolUse`), Claude recibe el alcance del cambio: quién
+  depende de lo que va a tocar, marcando las relaciones que grep no encuentra.
+  Esta es la mitad que evita que se olvide una.
+- **Después de editar** (`PostToolUse`), recibe un recordatorio de los hechos
+  afectados. El momento en que registrar un hallazgo es barato es justo después
+  de descubrirlo.
 
 ## Diseñado para trabajo en equipo
 
@@ -148,7 +161,7 @@ Dicho ahora y no dentro de tres meses:
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 48 pruebas).
+v0.1. El núcleo curado está completo y probado (`npm test`, 70 pruebas).
 
 Siguiente paso previsto: un extractor opcional basado en Roslyn que emita hechos
 en este mismo formato con `source: extractor:roslyn`, para poblar las aristas
