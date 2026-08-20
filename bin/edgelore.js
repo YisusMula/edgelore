@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cmdQuery, cmdImpact, cmdFind, cmdPath, cmdStats, cmdKinds, cmdChecklist, cmdValidate, cmdStale } from '../src/commands/read.js';
 import { cmdAdd, cmdLink, cmdVerify, cmdRemove } from '../src/commands/write.js';
-import { cmdInit, cmdUninstall, availableRuleSets } from '../src/commands/init.js';
+import { cmdInit, cmdUninstall, cmdRules, availableRuleSets } from '../src/commands/init.js';
 import { cmdHook } from '../src/commands/hook.js';
 import { EDGE_TYPES, CONFIDENCE } from '../src/model.js';
 
@@ -60,6 +60,7 @@ export function parseArgs(argv) {
 
 const COMMANDS = {
   init: { run: cmdInit, help: 'Prepara el repositorio actual: .edgelore/, reglas, skill y hooks.' },
+  rules: { run: cmdRules, help: 'Lista las reglas instaladas o anade mas: `rules add <nombre>`.' },
   uninstall: { run: cmdUninstall, help: 'Retira skill y hooks. Con --all borra tambien los hechos.' },
   add: { run: cmdAdd, help: 'Registra o actualiza un hecho.' },
   link: { run: cmdLink, help: 'Anade una arista entre dos nodos.' },
@@ -110,7 +111,7 @@ CONFIANZA POR DEFECTO
   reglas de kind    la que declare la regla (normalmente certain)
 
 EJEMPLOS
-  edgelore init --rules dotnet-core,dotnet-maui
+  edgelore init                                    # detecta el stack solo
   edgelore add Erp.Ventas.PagoService --file src/Ventas/PagoService.cs --kind service
   edgelore link AppShell Erp.Ui.DetallePage string-ref --at AppShell.xaml.cs:42 \\
     --note 'registrada como ruta "detalle"'

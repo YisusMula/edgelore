@@ -68,6 +68,21 @@ pensando en quien lo lea dentro de seis meses sin contexto.
 leyendo el fichero; pregunta por el literal de la ruta, por el orden de arranque,
 por qué pasa si falta la configuración.
 
+## Cómo llegan las reglas a tu repositorio
+
+`edgelore init` **detecta el stack** leyendo los ficheros de proyecto
+(`.csproj`, `.sln`, `.props`…) hasta tres niveles de profundidad, saltándose
+`obj/`, `bin/` y `node_modules/`. Instala solo lo que reconoce: un proyecto MAUI
+con Entity Framework recibe `dotnet-core`, `dotnet-maui` y `dotnet-data`, pero no
+`dotnet-winservice`.
+
+Si no reconoce el stack no instala ninguna regla y lo dice. Edgelore funciona
+igual sin ellas — solo dejan de generarse solas las aristas de ciclo de vida.
+
+Para ampliar después, `edgelore rules add <nombre>` **nunca sobreescribe** una
+regla existente, que puede llevar semanas de ajustes del equipo. Ésa es la
+diferencia con `init --force`, que sí las reinstala.
+
 ## Reglas incluidas
 
 | Fichero | Cubre |

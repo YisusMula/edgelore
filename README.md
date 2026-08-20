@@ -67,14 +67,23 @@ Mientras tanto se instala desde el repositorio:
 npm install -g github:YisusMula/graphifyLocal
 
 cd tu-repositorio
-edgelore init --rules dotnet-core,dotnet-maui,dotnet-winservice,dotnet-data
+edgelore init
 git add .edgelore .claude && git commit -m "Añade índice Edgelore"
 ```
 
 Una vez publicado, `npm install -g edgelore`.
 
-`edgelore init` instala el almacén de hechos, las reglas del stack elegido, una
-skill de Claude Code y dos hooks. Requiere Node 20 o superior y nada más.
+`edgelore init` no lleva argumentos: detecta el stack leyendo los ficheros de
+proyecto e instala solo las reglas que correspondan. Un repositorio de Python no
+recibe reglas de .NET; si no reconoce nada, no instala ninguna y te dice cómo
+añadirlas. Instala además el almacén de hechos, una skill de Claude Code y dos
+hooks. Requiere Node 20 o superior y nada más.
+
+```bash
+edgelore rules                    # ver instaladas y disponibles
+edgelore rules add dotnet-maui    # añadir una; nunca pisa las existentes
+edgelore init --rules all         # forzar todas al inicializar
+```
 
 **Para quitarlo:** `edgelore uninstall` retira la skill y los hooks y deja el
 repositorio como estaba; los hechos se conservan salvo que pases `--all`. No se
@@ -161,7 +170,7 @@ Dicho ahora y no dentro de tres meses:
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 70 pruebas).
+v0.1. El núcleo curado está completo y probado (`npm test`, 85 pruebas).
 
 Siguiente paso previsto: un extractor opcional basado en Roslyn que emita hechos
 en este mismo formato con `source: extractor:roslyn`, para poblar las aristas

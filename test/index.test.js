@@ -10,7 +10,7 @@ import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
 import { parseEdgeFlag, cmdAdd } from '../src/commands/write.js';
-import { cmdInit, cmdUninstall } from '../src/commands/init.js';
+import { cmdInit, cmdUninstall, cmdRules, detectRuleSets } from '../src/commands/init.js';
 import { parseArgs } from '../bin/edgelore.js';
 
 /** Repositorio temporal con Edgelore instalado, para pruebas aisladas. */
@@ -475,4 +475,92 @@ test('uninstall --all borra tambien el almacen', () => {
   writeNode(root, { id: 'A', edges: [] });
   cmdUninstall([], { dir: root, all: true });
   assert.equal(fs.existsSync(path.join(root, '.edgelore')), false);
+});
+
+/** Repositorio vacio con los ficheros de proyecto que se le indiquen. */
+function repoCon(ficheros) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'edgelore-det-'));
+  for (const [nombre, contenido] of Object.entries(ficheros)) {
+    const destino = path.join(root, nombre);
+    fs.mkdirSync(path.dirname(destino), { recursive: true });
+    fs.writeFileSync(destino, contenido);
+  }
+  return root;
+}
+
+test('un repositorio que no es .NET no recibe reglas de .NET', () => {
+  // El motivo de la deteccion: en un proyecto de Python, cuatro ficheros de
+  // reglas de .NET son ruido que alguien tendria que borrar a mano.
+  const root = repoCon({ 'main.py': 'print(1)\n', 'requirements.txt': 'flask\n' });
+  assert.deepEqual(detectRuleSets(root), []);
+
+  cmdInit([], { dir: root, 'no-claude': true });
+  assert.equal(fs.existsSync(path.join(root, '.edgelore', 'rules', 'dotnet-maui.yaml')), false);
+});
+
+test('init explica que hacer cuando no reconoce el stack', () => {
+  const root = repoCon({ 'main.py': 'print(1)\n' });
+  const salida = cmdInit([], { dir: root, 'no-claude': true }).output;
+  assert.match(salida, /No se ha reconocido el stack/);
+  assert.match(salida, /edgelore rules add/);
+});
+
+test('detecta MAUI y EF sin traerse las reglas de servicios de Windows', () => {
+  const root = repoCon({
+    'src/App.csproj': '<Project><PropertyGroup><UseMaui>true</UseMaui></PropertyGroup>'
+      + '<ItemGroup><PackageReference Include="Microsoft.EntityFrameworkCore" /></ItemGroup></Project>',
+  });
+  const reglas = detectRuleSets(root);
+  assert.ok(reglas.includes('dotnet-core'));
+  assert.ok(reglas.includes('dotnet-maui'));
+  assert.ok(reglas.includes('dotnet-data'));
+  assert.ok(!reglas.includes('dotnet-winservice'));
+});
+
+test('detecta un servicio de Windows por su paquete de hosting', () => {
+  const root = repoCon({
+    'Svc.csproj': '<Project><ItemGroup><PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" /></ItemGroup></Project>',
+  });
+  assert.ok(detectRuleSets(root).includes('dotnet-winservice'));
+});
+
+test('la deteccion ignora los directorios de compilacion', () => {
+  const root = repoCon({ 'obj/Debug/generado.csproj': '<Project><UseMaui>true</UseMaui></Project>' });
+  assert.deepEqual(detectRuleSets(root), [], 'obj/ no describe el stack del repositorio');
+});
+
+test('--rules explicito manda sobre la deteccion, y "all" instala todas', () => {
+  const root = repoCon({ 'main.py': 'print(1)\n' });
+  cmdInit([], { dir: root, rules: ['dotnet-maui'], 'no-claude': true });
+  const instaladas = fs.readdirSync(path.join(root, '.edgelore', 'rules'));
+  assert.deepEqual(instaladas, ['dotnet-maui.yaml']);
+
+  const otro = repoCon({ 'main.py': 'print(1)\n' });
+  cmdInit([], { dir: otro, rules: ['all'], 'no-claude': true });
+  assert.equal(fs.readdirSync(path.join(otro, '.edgelore', 'rules')).length, 4);
+});
+
+test('rules add anade sin sobreescribir lo que el equipo haya ajustado', () => {
+  const root = sandbox();
+  const fichero = path.join(root, '.edgelore', 'rules', 'dotnet-maui.yaml');
+  fs.writeFileSync(fichero, '# ajustado por el equipo\nid: dotnet-maui\n');
+
+  const salida = cmdRules(['add', 'dotnet-maui', 'dotnet-data'], { dir: root }).output;
+  assert.match(fs.readFileSync(fichero, 'utf8'), /ajustado por el equipo/, 'nunca pisa una regla existente');
+  assert.ok(fs.existsSync(path.join(root, '.edgelore', 'rules', 'dotnet-data.yaml')));
+  assert.match(salida, /ya estaba/);
+});
+
+test('rules add rechaza nombres inventados', () => {
+  const root = sandbox();
+  const resultado = cmdRules(['add', 'inventada'], { dir: root });
+  assert.equal(resultado.code, 2);
+  assert.match(resultado.output, /desconocidas/);
+});
+
+test('rules list muestra instaladas y disponibles', () => {
+  const root = sandbox();
+  const salida = cmdRules(['list'], { dir: root }).output;
+  assert.match(salida, /dotnet-maui/);
+  assert.match(salida, /Disponibles para anadir/);
 });

@@ -21,6 +21,121 @@ export function availableRuleSets() {
   return fs.readdirSync(dir).filter((name) => /\.ya?ml$/.test(name)).map((name) => name.replace(/\.ya?ml$/, ''));
 }
 
+const SKIP_DIRS = new Set(['.git', 'node_modules', 'bin', 'obj', 'dist', 'build', 'vendor', 'packages', '.vs']);
+const PROJECT_FILES = /\.(csproj|fsproj|vbproj|sln|props|targets)$/i;
+const MAX_SCAN_DEPTH = 3;
+const MAX_SCAN_BYTES = 512 * 1024;
+
+/**
+ * Recoge los ficheros de proyecto del repositorio, con profundidad y tamano
+ * acotados: detectar el stack no puede convertirse en recorrer un monorepo
+ * entero durante el arranque.
+ */
+function collectProjectFiles(root) {
+  const names = [];
+  let contents = '';
+
+  const walk = (dir, depth) => {
+    if (depth > MAX_SCAN_DEPTH || contents.length > MAX_SCAN_BYTES) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (!SKIP_DIRS.has(entry.name)) walk(path.join(dir, entry.name), depth + 1);
+      } else if (PROJECT_FILES.test(entry.name)) {
+        names.push(entry.name);
+        try {
+          contents += fs.readFileSync(path.join(dir, entry.name), 'utf8');
+        } catch {
+          /* un fichero ilegible no debe impedir la deteccion */
+        }
+      }
+    }
+  };
+
+  walk(root, 0);
+  return { names, contents };
+}
+
+/**
+ * Deduce que reglas tienen sentido en este repositorio.
+ *
+ * Instalar las cuatro reglas de .NET en un proyecto de Python seria ruido que
+ * alguien tendria que borrar a mano, y `edgelore init` debe poder ejecutarse a
+ * secas, como `git init`. Solo se instala lo que se detecta; si no se reconoce
+ * nada, no se instala ninguna y se explica como anadirlas.
+ */
+export function detectRuleSets(root) {
+  const { names, contents } = collectProjectFiles(root);
+  if (!names.length) return [];
+
+  const detected = ['dotnet-core'];
+  if (/<UseMaui>|Microsoft\.Maui|Xamarin\.Forms/i.test(contents)) detected.push('dotnet-maui');
+  if (/EntityFrameworkCore|Microsoft\.Data\.SqlClient|System\.Data\.SqlClient|Dapper|npgsql/i.test(contents)) {
+    detected.push('dotnet-data');
+  }
+  if (/Hosting\.WindowsServices|ServiceBase|WindowsService/i.test(contents)) detected.push('dotnet-winservice');
+
+  const available = availableRuleSets();
+  return detected.filter((name) => available.includes(name));
+}
+
+/**
+ * `rules add`: instala conjuntos de reglas en un repositorio ya inicializado.
+ *
+ * Es la via segura para ampliar despues: a diferencia de `init --force`, jamas
+ * sobreescribe una regla existente, que puede llevar semanas de ajustes del
+ * equipo.
+ */
+export function cmdRules(args, options) {
+  const action = args[0];
+  const root = path.resolve(options.dir ?? findStoreRoot() ?? process.cwd());
+  const available = availableRuleSets();
+
+  if (action === 'list' || !action) {
+    const installed = fs.existsSync(paths(root).rules)
+      ? fs.readdirSync(paths(root).rules).filter((n) => /\.ya?ml$/.test(n)).map((n) => n.replace(/\.ya?ml$/, ''))
+      : [];
+    const lines = ['Reglas instaladas en este repositorio:'];
+    installed.forEach((name) => lines.push(`  ${name}`));
+    if (!installed.length) lines.push('  (ninguna)');
+    const rest = available.filter((name) => !installed.includes(name));
+    if (rest.length) {
+      lines.push('', 'Disponibles para anadir:');
+      rest.forEach((name) => lines.push(`  ${name}`));
+      lines.push('', `  edgelore rules add ${rest[0]}`);
+    }
+    return { output: lines.join('\n') };
+  }
+
+  if (action !== 'add') {
+    return { output: 'Uso: edgelore rules [list]\n     edgelore rules add <nombre...>', code: 2 };
+  }
+
+  const names = args.slice(1);
+  if (!names.length) {
+    return { output: `Uso: edgelore rules add <nombre...>\nDisponibles: ${available.join(', ')}`, code: 2 };
+  }
+  const unknown = names.filter((name) => !available.includes(name));
+  if (unknown.length) {
+    return { output: `Reglas desconocidas: ${unknown.join(', ')}\nDisponibles: ${available.join(', ')}`, code: 2 };
+  }
+
+  const report = { written: [], skipped: [] };
+  for (const name of names) {
+    copyIfAbsent(path.join(TEMPLATES, 'rules', `${name}.yaml`), path.join(paths(root).rules, `${name}.yaml`), report);
+  }
+  const lines = [];
+  report.written.forEach((file) => lines.push(`  anadida  ${path.relative(root, file)}`));
+  report.skipped.forEach((file) => lines.push(`  ya estaba ${path.relative(root, file)} (no se toca)`));
+  lines.push('', 'Ejecuta `edgelore kinds` para ver los tipos de nodo que aportan.');
+  return { output: lines.join('\n') };
+}
+
 function copyIfAbsent(source, target, report, { force = false } = {}) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   if (fs.existsSync(target) && !force) {
@@ -81,11 +196,13 @@ export function cmdInit(args, options) {
   }
 
   const available = availableRuleSets();
-  const requested = options.rules?.length ? options.rules : available;
+  const explicit = options.rules?.length ? options.rules : null;
+  const requested = explicit?.includes('all') ? available : explicit ?? detectRuleSets(root);
   const unknown = requested.filter((name) => !available.includes(name));
   if (unknown.length) {
     throw new Error(`Reglas desconocidas: ${unknown.join(', ')}\nDisponibles: ${available.join(', ')}`);
   }
+  const detected = explicit === null;
 
   const report = { written: [], skipped: [] };
   const store = paths(root);
@@ -115,9 +232,23 @@ export function cmdInit(args, options) {
   const lines = [`Edgelore instalado en ${root}`, ''];
   report.written.forEach((file) => lines.push(`  creado   ${path.relative(root, file)}`));
   report.skipped.forEach((file) => lines.push(`  existia  ${path.relative(root, file)}`));
+  lines.push('');
+  if (requested.length) {
+    lines.push(
+      detected
+        ? `Reglas instaladas segun el stack detectado: ${requested.join(', ')}`
+        : `Reglas instaladas: ${requested.join(', ')}`,
+    );
+  } else {
+    lines.push(
+      'No se ha reconocido el stack, asi que no se ha instalado ninguna regla.',
+      'Edgelore funciona igual sin ellas: solo dejan de generarse solas las aristas',
+      'de ciclo de vida. Para anadirlas:',
+      `  edgelore rules add <nombre>     disponibles: ${available.join(', ')}`,
+      '  o escribe las vuestras siguiendo docs/RULES.md',
+    );
+  }
   lines.push(
-    '',
-    `Reglas activas: ${requested.join(', ')}`,
     '',
     'Siguientes pasos:',
     '  1. edgelore kinds                 ver los tipos de nodo que conocen las reglas',
