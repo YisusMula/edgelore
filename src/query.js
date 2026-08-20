@@ -1,7 +1,7 @@
 /**
  * Consulta y presentacion compacta del indice.
  *
- * Aqui es donde Nexo ahorra tokens o deja de hacerlo. La regla de diseno es
+ * Aqui es donde Edgelore ahorra tokens o deja de hacerlo. La regla de diseno es
  * unica y no negociable: una consulta devuelve SOLO el vecindario pedido, nunca
  * el indice entero. Un volcado completo dentro del contexto gastaria mas tokens
  * de los que ahorra, que es exactamente el fallo de meter las referencias en un
@@ -12,7 +12,7 @@ import { incomingEdges } from './store.js';
 
 const CONFIDENCE_MARK = { certain: '', likely: ' ~probable', unverified: ' ~SIN VERIFICAR' };
 
-/** Las aristas que grep no puede encontrar: el motivo por el que existe Nexo. */
+/** Las aristas que grep no puede encontrar: el motivo por el que existe Edgelore. */
 const HIDDEN_TYPES = new Set(['string-ref', 'lifecycle', 'event', 'config', 'schedules', 'affects']);
 
 export function isHiddenEdge(edge) {

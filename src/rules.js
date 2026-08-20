@@ -84,7 +84,7 @@ export function checklistFor(catalog, kind) {
 
 export function renderKinds(catalog) {
   if (catalog.size === 0) {
-    return 'No hay reglas cargadas. Anade ficheros a .nexo/rules/ o ejecuta `nexo init` de nuevo.';
+    return 'No hay reglas cargadas. Anade ficheros a .edgelore/rules/ o ejecuta `edgelore init` de nuevo.';
   }
   const grouped = new Map();
   for (const definition of catalog.values()) {

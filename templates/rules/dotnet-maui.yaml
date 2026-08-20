@@ -1,6 +1,6 @@
 # Reglas de .NET MAUI (y en buena medida Xamarin.Forms).
 #
-# El caso canonico que justifica todo Nexo: OnAppearing no lo llama nadie. Un
+# El caso canonico que justifica todo Edgelore: OnAppearing no lo llama nadie. Un
 # grep de "OnAppearing" devuelve la declaracion y ninguna llamada, de modo que
 # la pregunta "quien ejecuta esto" no tiene respuesta leyendo el codigo. Aqui se
 # declara una vez y vale para todas las paginas del proyecto.

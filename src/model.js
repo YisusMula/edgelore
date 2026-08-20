@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 /**
- * Esquema de un hecho de Nexo y su validacion.
+ * Esquema de un hecho de Edgelore y su validacion.
  *
  * Un hecho describe UN nodo (una clase, un metodo, una tabla, una clave de
  * configuracion) y las aristas que salen de el. Las aristas entrantes no se
@@ -156,7 +156,7 @@ export function validateNode(node, { source = 'hecho' } = {}) {
       fail(`${label}: source "${edge.source}" invalida. Usa human, rule:<id> o extractor:<id>`);
     }
     // Una arista implicita sin disparador es justo la que nadie sabra interpretar
-    // dentro de seis meses, que es el caso que Nexo existe para resolver.
+    // dentro de seis meses, que es el caso que Edgelore existe para resolver.
     if ((edge.type === 'lifecycle' || edge.type === 'schedules') && !edge.trigger) {
       fail(`${label}: las aristas ${edge.type} necesitan "trigger" explicando que las dispara`);
     }

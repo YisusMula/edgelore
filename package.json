@@ -1,10 +1,10 @@
 {
-  "name": "nexo-cli",
+  "name": "edgelore",
   "version": "0.1.0",
-  "description": "Indice curado e incremental de referencias ocultas de un codebase, consultable por agentes de IA.",
+  "description": "Indice curado e incremental de las referencias que el codigo no declara: lifecycle, literales, eventos y configuracion. Consultable por agentes de IA.",
   "type": "module",
   "bin": {
-    "nexo": "bin/nexo.js"
+    "edgelore": "bin/edgelore.js"
   },
   "engines": {
     "node": ">=20"
@@ -18,6 +18,27 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "knowledge-graph",
+    "code-index",
+    "claude-code",
+    "ai-agents",
+    "static-analysis",
+    "dotnet",
+    "maui",
+    "codebase-documentation"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YisusMula/graphifyLocal.git"
+  },
+  "homepage": "https://github.com/YisusMula/graphifyLocal#readme",
+  "bugs": {
+    "url": "https://github.com/YisusMula/graphifyLocal/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "MIT",
   "dependencies": {}

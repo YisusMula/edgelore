@@ -1,5 +1,5 @@
 /**
- * Acceso al almacen de hechos: `.nexo/` dentro del repositorio de trabajo.
+ * Acceso al almacen de hechos: `.edgelore/` dentro del repositorio de trabajo.
  *
  * Un fichero por nodo, a proposito. Un unico fichero grande produciria un
  * conflicto de merge en practicamente cada pull request, y un indice que da
@@ -11,7 +11,7 @@ import path from 'node:path';
 import { parseFrontmatter, parseYaml, stringifyFrontmatter } from './frontmatter.js';
 import { idToFilename, normalizeNode, validateNode } from './model.js';
 
-export const NEXO_DIR = '.nexo';
+export const EDGELORE_DIR = '.edgelore';
 
 export class StoreError extends Error {
   constructor(message) {
@@ -20,11 +20,11 @@ export class StoreError extends Error {
   }
 }
 
-/** Busca `.nexo/` hacia arriba desde `start`, como hace git con `.git`. */
+/** Busca `.edgelore/` hacia arriba desde `start`, como hace git con `.git`. */
 export function findStoreRoot(start = process.cwd()) {
   let dir = path.resolve(start);
   for (;;) {
-    if (fs.existsSync(path.join(dir, NEXO_DIR, 'config.yaml'))) return dir;
+    if (fs.existsSync(path.join(dir, EDGELORE_DIR, 'config.yaml'))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -35,15 +35,15 @@ export function requireStoreRoot(start = process.cwd()) {
   const root = findStoreRoot(start);
   if (!root) {
     throw new StoreError(
-      'No se ha encontrado ningun indice de Nexo en este repositorio.\n' +
-        'Ejecuta `nexo init` en la raiz del repositorio para crearlo.',
+      'No se ha encontrado ningun indice de Edgelore en este repositorio.\n' +
+        'Ejecuta `edgelore init` en la raiz del repositorio para crearlo.',
     );
   }
   return root;
 }
 
 export function paths(root) {
-  const base = path.join(root, NEXO_DIR);
+  const base = path.join(root, EDGELORE_DIR);
   return {
     base,
     config: path.join(base, 'config.yaml'),
@@ -119,7 +119,7 @@ export function loadIndex(root) {
   const declared = Number(loadConfig(root).version ?? FORMAT_VERSION);
   if (Number.isFinite(declared) && declared > FORMAT_VERSION) {
     problems.push(
-      `el indice declara la version de formato ${declared} y este CLI entiende hasta la ${FORMAT_VERSION}; actualiza nexo`,
+      `el indice declara la version de formato ${declared} y este CLI entiende hasta la ${FORMAT_VERSION}; actualiza edgelore`,
     );
   }
 
@@ -143,7 +143,7 @@ export function loadIndex(root) {
 
   // Windows no distingue mayusculas en los nombres de fichero: dos ids que solo
   // difieran en el caso conviven en Linux y en CI, pero colapsan en el portatil
-  // de quien desarrolla. Se avisa aqui para que `nexo validate` lo detecte antes
+  // de quien desarrolla. Se avisa aqui para que `edgelore validate` lo detecte antes
   // de que alguien pierda un hecho sin enterarse.
   const byLowercase = new Map();
   for (const id of nodes.keys()) {

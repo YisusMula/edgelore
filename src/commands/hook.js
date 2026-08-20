@@ -44,7 +44,7 @@ export function extractPaths(payload) {
  */
 export function buildNotice(root, index, files, { git = false } = {}) {
   const relatives = files.map((file) => path.relative(root, path.resolve(root, file)).split(path.sep).join('/'));
-  const tracked = relatives.filter((file) => !file.startsWith('..') && !file.startsWith('.nexo/'));
+  const tracked = relatives.filter((file) => !file.startsWith('..') && !file.startsWith('.edgelore/'));
   if (!tracked.length) return null;
 
   const known = [];
@@ -58,25 +58,25 @@ export function buildNotice(root, index, files, { git = false } = {}) {
     const suspect = known.filter(
       (node) => !node.verified?.commit || (git && changedSince(root, node.verified.commit, node.file)),
     );
-    lines.push(`Nexo: este fichero tiene ${known.length} hecho(s) registrados en el indice.`);
+    lines.push(`Edgelore: este fichero tiene ${known.length} hecho(s) registrados en el indice.`);
     known.slice(0, MAX_SUGGESTIONS).forEach((node) => {
       const edges = node.edges?.length ?? 0;
       lines.push(`  ${node.id} (${edges} arista${edges === 1 ? '' : 's'})`);
     });
     if (known.length > MAX_SUGGESTIONS) lines.push(`  ... y ${known.length - MAX_SUGGESTIONS} mas`);
     lines.push('');
-    lines.push('Si el cambio altera alguna relacion, actualizala con `nexo link`.');
+    lines.push('Si el cambio altera alguna relacion, actualizala con `edgelore link`.');
     if (suspect.length) {
-      lines.push(`Cuando confirmes que siguen siendo ciertos: ${suspect.map((n) => `nexo verify ${n.id}`).join('  ')}`);
+      lines.push(`Cuando confirmes que siguen siendo ciertos: ${suspect.map((n) => `edgelore verify ${n.id}`).join('  ')}`);
     }
   } else {
     // Sin ruido: solo se sugiere registrar cuando el indice ya esta en marcha,
     // para no molestar en un repositorio donde aun no se ha adoptado.
     if (index.nodes.size === 0) return null;
-    lines.push(`Nexo: ${tracked.join(', ')} no tiene ningun hecho registrado.`);
+    lines.push(`Edgelore: ${tracked.join(', ')} no tiene ningun hecho registrado.`);
     lines.push('Si has descubierto alguna conexion no evidente (lifecycle, string-ref,');
     lines.push('evento, configuracion), registrala ahora que la tienes fresca:');
-    lines.push(`  nexo add <Id> --file ${tracked[0]} --kind <kind>`);
+    lines.push(`  edgelore add <Id> --file ${tracked[0]} --kind <kind>`);
   }
 
   return lines.join('\n');

@@ -49,7 +49,7 @@ function verificationStamp(root, options) {
 
 export function cmdAdd(args, options) {
   const id = args[0];
-  if (!id) throw new Error('Uso: nexo add <id> [--file <ruta>] [--kind <kind>] [--edge destino:tipo:nota]');
+  if (!id) throw new Error('Uso: edgelore add <id> [--file <ruta>] [--kind <kind>] [--edge destino:tipo:nota]');
   const root = requireStoreRoot();
   const existing = readNode(root, id);
   const catalog = kindCatalog(loadRules(root));
@@ -107,7 +107,7 @@ export function cmdAdd(args, options) {
     applied.forEach((edge) => lines.push(`  ${edge.type.padEnd(11)} ${edge.to}`));
   }
   if (node.kind && !catalog.has(node.kind)) {
-    lines.push('', `Aviso: el kind "${node.kind}" no esta declarado en ninguna regla. Ejecuta \`nexo kinds\`.`);
+    lines.push('', `Aviso: el kind "${node.kind}" no esta declarado en ninguna regla. Ejecuta \`edgelore kinds\`.`);
   }
   const checklist = node.kind ? checklistFor(catalog, node.kind) : null;
   if (checklist?.items.length) lines.push('', renderChecklist(checklist));
@@ -118,7 +118,7 @@ export function cmdAdd(args, options) {
 export function cmdLink(args, options) {
   const [from, to, type] = args;
   if (!from || !to || !type) {
-    throw new Error(`Uso: nexo link <origen> <destino> <tipo> [--trigger "..."] [--at fichero:linea] [--note "..."]
+    throw new Error(`Uso: edgelore link <origen> <destino> <tipo> [--trigger "..."] [--at fichero:linea] [--note "..."]
 
 Tipos disponibles:
 ${Object.entries(EDGE_TYPES).map(([key, help]) => `  ${key.padEnd(11)} ${help}`).join('\n')}`);
@@ -158,14 +158,14 @@ ${Object.entries(EDGE_TYPES).map(([key, help]) => `  ${key.padEnd(11)} ${help}`)
 
   writeNode(root, node, existing?.notes ?? '');
   const index = loadIndex(root);
-  const warning = index.nodes.has(to) ? '' : `\nAviso: "${to}" aun no tiene ficha propia. Registralo con \`nexo add ${to}\`.`;
+  const warning = index.nodes.has(to) ? '' : `\nAviso: "${to}" aun no tiene ficha propia. Registralo con \`edgelore add ${to}\`.`;
   return { output: `${from} --[${type}]--> ${to}${warning}` };
 }
 
 /** Vuelve a sellar un hecho como comprobado en el commit actual. */
 export function cmdVerify(args) {
   const id = args[0];
-  if (!id) throw new Error('Uso: nexo verify <id>');
+  if (!id) throw new Error('Uso: edgelore verify <id>');
   const root = requireStoreRoot();
   const existing = readNode(root, id);
   if (!existing) return { output: `No existe ningun hecho con id "${id}".`, code: 1 };
@@ -182,7 +182,7 @@ export function cmdVerify(args) {
 
 export function cmdRemove(args, options) {
   const id = args[0];
-  if (!id) throw new Error('Uso: nexo remove <id>');
+  if (!id) throw new Error('Uso: edgelore remove <id>');
   const root = requireStoreRoot();
   const file = nodePath(root, id);
   if (!fs.existsSync(file)) return { output: `No existe ningun hecho con id "${id}".`, code: 1 };

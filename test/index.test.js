@@ -11,11 +11,11 @@ import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, extractPaths } from '../src/commands/hook.js';
 import { parseEdgeFlag, cmdAdd } from '../src/commands/write.js';
 import { cmdInit } from '../src/commands/init.js';
-import { parseArgs } from '../bin/nexo.js';
+import { parseArgs } from '../bin/edgelore.js';
 
-/** Repositorio temporal con Nexo instalado, para pruebas aisladas. */
+/** Repositorio temporal con Edgelore instalado, para pruebas aisladas. */
 function sandbox() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nexo-test-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'edgelore-test-'));
   cmdInit([], { dir: root, rules: ['dotnet-maui', 'dotnet-core'], 'no-claude': true });
   return root;
 }
@@ -25,7 +25,7 @@ test('init deja un almacen detectable desde subdirectorios', () => {
   const deep = path.join(root, 'src', 'Ui');
   fs.mkdirSync(deep, { recursive: true });
   assert.equal(findStoreRoot(deep), root);
-  assert.ok(fs.existsSync(path.join(root, '.nexo', 'rules', 'dotnet-maui.yaml')));
+  assert.ok(fs.existsSync(path.join(root, '.edgelore', 'rules', 'dotnet-maui.yaml')));
 });
 
 test('init no pisa un indice existente salvo con --force', () => {
@@ -128,7 +128,7 @@ test('escribir un hecho invalido falla en vez de guardarlo', () => {
 
 test('el indice detecta ids duplicados y ficheros ilegibles', () => {
   const root = sandbox();
-  fs.writeFileSync(path.join(root, '.nexo', 'nodes', 'roto.md'), 'esto no es frontmatter\n');
+  fs.writeFileSync(path.join(root, '.edgelore', 'nodes', 'roto.md'), 'esto no es frontmatter\n');
   const index = loadIndex(root);
   assert.ok(index.problems.some((problem) => problem.includes('roto.md')));
 });
@@ -252,7 +252,7 @@ test('el hook ignora ediciones sobre el propio indice y fuera del repo', () => {
   const root = sandbox();
   writeNode(root, { id: 'A', file: 'src/a.cs', edges: [] });
   const index = loadIndex(root);
-  assert.equal(buildNotice(root, index, [path.join(root, '.nexo/nodes/A.md')]), null);
+  assert.equal(buildNotice(root, index, [path.join(root, '.edgelore/nodes/A.md')]), null);
   assert.equal(buildNotice(root, index, ['/etc/passwd']), null);
 });
 
@@ -286,7 +286,7 @@ test('readNode no devuelve un hecho cuyo id no coincide con el pedido', () => {
   const root = sandbox();
   writeNode(root, { id: 'Correcto', edges: [] });
   // Se falsea un fichero cuyo contenido declara otro id distinto del nombre.
-  fs.writeFileSync(path.join(root, '.nexo', 'nodes', 'Impostor.md'), '---\nid: Correcto\n---\n');
+  fs.writeFileSync(path.join(root, '.edgelore', 'nodes', 'Impostor.md'), '---\nid: Correcto\n---\n');
   assert.equal(readNode(root, 'Impostor'), null);
 });
 
@@ -336,12 +336,12 @@ test('cmdAdd usa siempre el id del argumento, no el del fichero leido', () => {
 
 test('avisa si el indice fue escrito por una version de formato mas nueva', () => {
   const root = sandbox();
-  fs.writeFileSync(path.join(root, '.nexo', 'config.yaml'), 'version: 99\n');
+  fs.writeFileSync(path.join(root, '.edgelore', 'config.yaml'), 'version: 99\n');
   assert.ok(loadIndex(root).problems.some((problem) => /version de formato 99/.test(problem)));
 });
 
 test('un config sin version no genera falsos avisos', () => {
   const root = sandbox();
-  fs.writeFileSync(path.join(root, '.nexo', 'config.yaml'), '# solo un comentario\n');
+  fs.writeFileSync(path.join(root, '.edgelore', 'config.yaml'), '# solo un comentario\n');
   assert.deepEqual(loadIndex(root).problems, []);
 });

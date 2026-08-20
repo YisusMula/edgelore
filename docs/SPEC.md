@@ -1,7 +1,7 @@
 # Formato de un hecho
 
 Un **hecho** describe un nodo y las aristas que salen de él. Vive en
-`.nexo/nodes/<id>.md`: frontmatter YAML para lo consultable, cuerpo Markdown
+`.edgelore/nodes/<id>.md`: frontmatter YAML para lo consultable, cuerpo Markdown
 para el matiz que no cabe en un campo.
 
 ```markdown
@@ -40,13 +40,13 @@ tiene el Id cuando se construye la página. Cambiarlo rompe la vuelta atrás.
 | Campo | Obligatorio | Descripción |
 |---|---|---|
 | `id` | sí | Identificador único y estable. Convención: nombre cualificado (`Erp.Ventas.PagoService`). |
-| `kind` | no | Tipo de nodo. Activa las reglas del framework. `nexo kinds` los lista. |
+| `kind` | no | Tipo de nodo. Activa las reglas del framework. `edgelore kinds` los lista. |
 | `file` | no | Ruta **relativa a la raíz del repositorio**. Se valida que exista. |
 | `lang` | no | Lenguaje, informativo. |
 | `summary` | no | Una línea, máximo 300 caracteres. El detalle va en el cuerpo. |
 | `tags` | no | Lista para agrupar por área funcional. |
 | `edges` | no | Aristas salientes. |
-| `verified` | no | `commit`, `date` y opcionalmente `by`. Base de `nexo stale`. |
+| `verified` | no | `commit`, `date` y opcionalmente `by`. Base de `edgelore stale`. |
 
 ## Campos de una arista
 
@@ -91,7 +91,7 @@ conflictos de merge cuando dos personas trabajan a la vez.
 **`confidence` y `verified` no son burocracia.** El riesgo real de un índice
 curado no es quedarse corto, es **mentir**: un hecho que era cierto hace tres
 meses se lee hoy con la misma confianza que uno recién comprobado. `confidence`
-dice cuánto se comprobó; `verified.commit` permite a `nexo stale` detectar que el
+dice cuánto se comprobó; `verified.commit` permite a `edgelore stale` detectar que el
 código cambió después. Sin ambos campos el índice se pudre en silencio.
 
 ## Reglas de identificación
@@ -105,7 +105,7 @@ código cambió después. Sin ambos campos el índice se pudre en silencio.
 
 ## Edición
 
-Usa `nexo add` y `nexo link` en vez de editar los ficheros a mano. El CLI valida
+Usa `edgelore add` y `edgelore link` en vez de editar los ficheros a mano. El CLI valida
 el esquema y normaliza el orden de las claves y de las aristas, que es lo que
-mantiene los diffs limpios. Editar a mano funciona, pero `nexo validate` es
+mantiene los diffs limpios. Editar a mano funciona, pero `edgelore validate` es
 entonces tu única red.

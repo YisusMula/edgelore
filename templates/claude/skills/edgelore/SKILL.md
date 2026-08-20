@@ -1,5 +1,5 @@
 ---
-name: nexo
+name: edgelore
 description: >-
   Indice curado de referencias ocultas de este repositorio: relaciones que grep no
   puede encontrar (lifecycle como OnAppearing u OnStart, rutas y reflexion por
@@ -9,9 +9,9 @@ description: >-
   de investigar o de modificar codigo para registrar lo que hayas descubierto.
 ---
 
-# Nexo: consulta antes de buscar, registra despues de descubrir
+# Edgelore: consulta antes de buscar, registra despues de descubrir
 
-Este repositorio mantiene un indice de hechos en `.nexo/`, versionado con git y
+Este repositorio mantiene un indice de hechos en `.edgelore/`, versionado con git y
 construido poco a poco por el equipo. Contiene lo que el codigo no dice de si
 mismo.
 
@@ -22,12 +22,12 @@ cambiarlo, **consulta el indice primero**. Cuesta unos cientos de tokens y a
 menudo responde de golpe lo que costaria diez busquedas:
 
 ```
-nexo query <Id>              # el nodo, lo que sale de el y lo que apunta hacia el
-nexo find <texto>            # buscar cuando no sabes el id exacto
-nexo path <desde> <hasta>    # como conecta A con B
+edgelore query <Id>              # el nodo, lo que sale de el y lo que apunta hacia el
+edgelore find <texto>            # buscar cuando no sabes el id exacto
+edgelore path <desde> <hasta>    # como conecta A con B
 ```
 
-`nexo query` devuelve dos bloques. **LLEGA DESDE** es el importante: son las
+`edgelore query` devuelve dos bloques. **LLEGA DESDE** es el importante: son las
 aristas entrantes, es decir, quien depende de este nodo. Esa es justo la
 pregunta que grep no sabe contestar cuando la relacion no esta escrita.
 
@@ -38,14 +38,14 @@ ciego:
 | Situacion | Herramienta |
 |---|---|
 | Quien llama a este metodo (llamada escrita) | grep |
-| Quien ejecuta `OnAppearing`, `OnStart`, un job | **nexo** |
-| Que ruta o literal resuelve a esta clase | **nexo** |
-| Quien consume este evento | **nexo** |
-| Quien escribe en esta tabla | **nexo** |
-| Que pasa si cambio esta clave de configuracion | **nexo** |
+| Quien ejecuta `OnAppearing`, `OnStart`, un job | **edgelore** |
+| Que ruta o literal resuelve a esta clase | **edgelore** |
+| Quien consume este evento | **edgelore** |
+| Quien escribe en esta tabla | **edgelore** |
+| Que pasa si cambio esta clave de configuracion | **edgelore** |
 
 Trata cada hecho segun su etiqueta de confianza. `~SIN VERIFICAR` y `~probable`
-son pistas que hay que comprobar, no verdades. Si `nexo stale` marca un hecho, el
+son pistas que hay que comprobar, no verdades. Si `edgelore stale` marca un hecho, el
 codigo cambio despues de verificarlo: leelo antes de fiarte.
 
 ## Despues de descubrir: registra
@@ -62,19 +62,19 @@ Registra cuando:
 
 ```
 # un nodo nuevo, con las aristas implicitas del framework ya aplicadas
-nexo add Erp.Ui.DetallePage --file src/Ui/DetallePage.xaml.cs --kind maui-page \
+edgelore add Erp.Ui.DetallePage --file src/Ui/DetallePage.xaml.cs --kind maui-page \
   --summary "Detalle de factura; carga en OnAppearing, no en el constructor"
 
 # una relacion concreta
-nexo link AppShell Erp.Ui.DetallePage string-ref \
+edgelore link AppShell Erp.Ui.DetallePage string-ref \
   --at src/AppShell.xaml.cs:42 --note 'registrada como ruta "detalle"'
 
-nexo link Erp.Ventas.PagoService Facturas writes --confidence certain
-nexo verify Erp.Ui.DetallePage      # tras confirmar que sigue siendo cierto
+edgelore link Erp.Ventas.PagoService Facturas writes --confidence certain
+edgelore verify Erp.Ui.DetallePage      # tras confirmar que sigue siendo cierto
 ```
 
-`nexo kinds` lista los tipos de nodo que conocen las reglas activas.
-`nexo checklist <kind>` te dice que comprobar para ese tipo: usalo cuando
+`edgelore kinds` lista los tipos de nodo que conocen las reglas activas.
+`edgelore checklist <kind>` te dice que comprobar para ese tipo: usalo cuando
 registres un nodo nuevo, porque son justo las preguntas cuya respuesta se pierde.
 
 ### Que merece la pena registrar
@@ -101,12 +101,12 @@ ninguno, y quien esta delante es quien puede confirmarlo.
 
 ## Reglas de higiene
 
-- Un hecho por nodo, en su propio fichero. Nunca edites `.nexo/nodes/*.md` a mano
-  si puedes usar `nexo add` o `nexo link`: el CLI valida y normaliza, lo que
+- Un hecho por nodo, en su propio fichero. Nunca edites `.edgelore/nodes/*.md` a mano
+  si puedes usar `edgelore add` o `edgelore link`: el CLI valida y normaliza, lo que
   mantiene los diffs limpios y evita conflictos de merge.
 - Nunca vuelques el indice entero en el contexto. Consultas dirigidas siempre.
-  Volcarlo gasta mas tokens de los que ahorra, que es precisamente lo que Nexo
+  Volcarlo gasta mas tokens de los que ahorra, que es precisamente lo que Edgelore
   existe para evitar.
 - Si un hecho resulta ser falso, corrigelo o borralo en el momento.
-  `nexo validate` corre en CI y protege la coherencia, pero no puede saber si un
+  `edgelore validate` corre en CI y protege la coherencia, pero no puede saber si un
   hecho miente.

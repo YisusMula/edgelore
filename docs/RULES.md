@@ -5,7 +5,7 @@ declaración vale para todos los nodos de ese tipo en el proyecto. Es lo que hac
 que el índice escale: sin reglas, alguien tendría que escribir a mano la arista
 de `OnAppearing` en las cuarenta páginas de la aplicación.
 
-Las reglas viven en `.nexo/rules/*.yaml` y se versionan con el repositorio.
+Las reglas viven en `.edgelore/rules/*.yaml` y se versionan con el repositorio.
 
 ## Estructura
 
@@ -79,8 +79,8 @@ por qué pasa si falta la configuración.
 
 ## Añadir un framework nuevo
 
-Crea `.nexo/rules/<id>.yaml` con la estructura de arriba y confírmalo al
-repositorio. `nexo kinds` lo recogerá en la siguiente ejecución; no hay nada que
+Crea `.edgelore/rules/<id>.yaml` con la estructura de arriba y confírmalo al
+repositorio. `edgelore kinds` lo recogerá en la siguiente ejecución; no hay nada que
 registrar ni recompilar.
 
 Como el formato de un hecho no depende de ningún parser, una regla puede

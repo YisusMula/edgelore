@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Punto de entrada del CLI de Nexo.
+ * Punto de entrada del CLI de Edgelore.
  *
  * Sin dependencias externas, tambien para el parseo de argumentos: este binario
  * se ejecuta en cada hook de edicion, y el coste de arranque de un arbol de
@@ -58,7 +58,7 @@ export function parseArgs(argv) {
 }
 
 const COMMANDS = {
-  init: { run: cmdInit, help: 'Prepara el repositorio actual: .nexo/, reglas, skill y hook.' },
+  init: { run: cmdInit, help: 'Prepara el repositorio actual: .edgelore/, reglas, skill y hook.' },
   add: { run: cmdAdd, help: 'Registra o actualiza un hecho.' },
   link: { run: cmdLink, help: 'Anade una arista entre dos nodos.' },
   query: { run: cmdQuery, help: 'Muestra un nodo con sus aristas salientes y entrantes.' },
@@ -80,10 +80,10 @@ function help() {
     .map(([name, { help: text }]) => `  ${name.padEnd(10)} ${text}`)
     .join('\n');
 
-  return `nexo ${VERSION} - indice curado de referencias ocultas de un codebase
+  return `edgelore ${VERSION} - indice curado de referencias ocultas de un codebase
 
 USO
-  nexo <comando> [argumentos] [opciones]
+  edgelore <comando> [argumentos] [opciones]
 
 COMANDOS
 ${commands}
@@ -102,17 +102,17 @@ OPCIONES COMUNES
   --confidence X  certain, likely o unverified.
 
 CONFIANZA POR DEFECTO
-  nexo link         certain      es una afirmacion deliberada sobre una relacion
-  nexo add --edge   unverified   se escriben de corrido; confirmalas despues
+  edgelore link         certain      es una afirmacion deliberada sobre una relacion
+  edgelore add --edge   unverified   se escriben de corrido; confirmalas despues
   reglas de kind    la que declare la regla (normalmente certain)
 
 EJEMPLOS
-  nexo init --rules dotnet-core,dotnet-maui
-  nexo add Erp.Ventas.PagoService --file src/Ventas/PagoService.cs --kind service
-  nexo link AppShell Erp.Ui.DetallePage string-ref --at AppShell.xaml.cs:42 \\
+  edgelore init --rules dotnet-core,dotnet-maui
+  edgelore add Erp.Ventas.PagoService --file src/Ventas/PagoService.cs --kind service
+  edgelore link AppShell Erp.Ui.DetallePage string-ref --at AppShell.xaml.cs:42 \\
     --note 'registrada como ruta "detalle"'
-  nexo query Erp.Ui.DetallePage
-  nexo path AppShell Erp.Data.FacturaRepository
+  edgelore query Erp.Ui.DetallePage
+  edgelore path AppShell Erp.Data.FacturaRepository
 
 REGLAS DISPONIBLES EN init
   ${availableRuleSets().join(', ') || '(ninguna)'}
@@ -133,7 +133,7 @@ async function main() {
   const name = argv[0];
   const command = COMMANDS[name];
   if (!command) {
-    process.stderr.write(`Comando desconocido: ${name}\nEjecuta \`nexo help\` para ver los disponibles.\n`);
+    process.stderr.write(`Comando desconocido: ${name}\nEjecuta \`edgelore help\` para ver los disponibles.\n`);
     return 2;
   }
 

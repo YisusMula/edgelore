@@ -1,7 +1,7 @@
 /**
  * Parser y serializador de un subconjunto estricto de YAML.
  *
- * Nexo no depende de librerias externas a proposito: el CLI se ejecuta en cada
+ * Edgelore no depende de librerias externas a proposito: el CLI se ejecuta en cada
  * hook de edicion, y una cadena de dependencias seria coste de arranque y
  * superficie de supply chain. El formato de los hechos esta bajo nuestro
  * control, asi que basta con soportar el subconjunto que define docs/SPEC.md:
@@ -70,7 +70,7 @@ function foldLines(bodyLines) {
  *
  * Los escalares de bloque (`>-`, `|`) se resuelven aqui y no en el parser, para
  * poder leer su cuerpo en crudo: dentro de un bloque, una almohadilla es texto y
- * una linea en blanco significa algo. Los hechos de Nexo estan llenos de prosa
+ * una linea en blanco significa algo. Los hechos de Edgelore estan llenos de prosa
  * explicativa, asi que perder fidelidad ahi seria perder justo lo que importa.
  */
 function tokenize(src) {
@@ -135,7 +135,7 @@ function unquote(value, line) {
 /**
  * Los escalares se dejan como cadena salvo los tres literales reservados. No se
  * convierten numeros a proposito: `2026-08-19` o `1.10` mutarian de tipo y los
- * campos de Nexo (fechas, hashes, versiones) son textuales.
+ * campos de Edgelore (fechas, hashes, versiones) son textuales.
  */
 function parseScalar(value, line) {
   const text = value.trim();
@@ -320,7 +320,7 @@ function isPlainObject(value) {
 }
 
 /**
- * Serializa preservando el orden de insercion de las claves. Nexo escribe
+ * Serializa preservando el orden de insercion de las claves. Edgelore escribe
  * siempre las claves en el mismo orden (ver model.js), de modo que dos personas
  * que editan el mismo hecho producen diffs minimos en vez de reordenaciones.
  */

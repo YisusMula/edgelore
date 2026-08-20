@@ -1,5 +1,5 @@
 /**
- * `nexo init`: prepara un repositorio para usar el indice.
+ * `edgelore init`: prepara un repositorio para usar el indice.
  *
  * Instala tres cosas y ninguna mas: el almacen de hechos, las reglas del stack
  * elegido, y la integracion con Claude (skill + hook). Todo se escribe dentro
@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NEXO_DIR, findStoreRoot, paths } from '../store.js';
+import { EDGELORE_DIR, findStoreRoot, paths } from '../store.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES = path.resolve(HERE, '..', '..', 'templates');
@@ -43,21 +43,21 @@ function writeIfAbsent(target, content, report, { force = false } = {}) {
   return true;
 }
 
-const CONFIG_TEMPLATE = (rules) => `# Configuracion de Nexo.
+const CONFIG_TEMPLATE = (rules) => `# Configuracion de Edgelore.
 #
-# El indice vive en .nexo/ y se versiona con el repositorio: cada persona del
+# El indice vive en .edgelore/ y se versiona con el repositorio: cada persona del
 # equipo lo amplia durante su trabajo normal y todos consumen el resultado.
 #
-# Las reglas activas son, sencillamente, los ficheros que haya en .nexo/rules/.
+# Las reglas activas son, sencillamente, los ficheros que haya en .edgelore/rules/.
 # No hay una lista que mantener aqui: anadir un fichero basta para activarlo.
-# Instaladas por \`nexo init\`: ${rules.join(', ') || '(ninguna)'}.
+# Instaladas por \`edgelore init\`: ${rules.join(', ') || '(ninguna)'}.
 
 version: 1
 `;
 
 const GITIGNORE_BLOCK = `
-# Nexo: los hechos SI se versionan; los artefactos derivados no.
-.nexo/cache/
+# Edgelore: los hechos SI se versionan; los artefactos derivados no.
+.edgelore/cache/
 `;
 
 export function cmdInit(args, options) {
@@ -67,7 +67,7 @@ export function cmdInit(args, options) {
   const existing = findStoreRoot(root);
   if (existing === root && !options.force) {
     return {
-      output: `Ya hay un indice de Nexo en ${path.join(root, NEXO_DIR)}.\nUsa --force para reinstalar plantillas y reglas.`,
+      output: `Ya hay un indice de Edgelore en ${path.join(root, EDGELORE_DIR)}.\nUsa --force para reinstalar plantillas y reglas.`,
       code: 1,
     };
   }
@@ -93,8 +93,8 @@ export function cmdInit(args, options) {
 
   if (!options['no-claude']) {
     copyIfAbsent(
-      path.join(TEMPLATES, 'claude', 'skills', 'nexo', 'SKILL.md'),
-      path.join(root, '.claude', 'skills', 'nexo', 'SKILL.md'),
+      path.join(TEMPLATES, 'claude', 'skills', 'edgelore', 'SKILL.md'),
+      path.join(root, '.claude', 'skills', 'edgelore', 'SKILL.md'),
       report,
       { force },
     );
@@ -104,7 +104,7 @@ export function cmdInit(args, options) {
   const gitignore = path.join(root, '.gitignore');
   if (fs.existsSync(gitignore)) {
     const current = fs.readFileSync(gitignore, 'utf8');
-    if (!current.includes('.nexo/cache/')) {
+    if (!current.includes('.edgelore/cache/')) {
       fs.appendFileSync(gitignore, GITIGNORE_BLOCK, 'utf8');
       report.written.push(gitignore);
     }
@@ -112,7 +112,7 @@ export function cmdInit(args, options) {
     writeIfAbsent(gitignore, GITIGNORE_BLOCK.trimStart(), report, { force });
   }
 
-  const lines = [`Nexo instalado en ${root}`, ''];
+  const lines = [`Edgelore instalado en ${root}`, ''];
   report.written.forEach((file) => lines.push(`  creado   ${path.relative(root, file)}`));
   report.skipped.forEach((file) => lines.push(`  existia  ${path.relative(root, file)}`));
   lines.push(
@@ -120,9 +120,9 @@ export function cmdInit(args, options) {
     `Reglas activas: ${requested.join(', ')}`,
     '',
     'Siguientes pasos:',
-    '  1. nexo kinds                 ver los tipos de nodo que conocen las reglas',
-    '  2. nexo add <id> --kind ...   registrar el primer hecho',
-    '  3. commit de .nexo/           para que el equipo lo comparta',
+    '  1. edgelore kinds                 ver los tipos de nodo que conocen las reglas',
+    '  2. edgelore add <id> --kind ...   registrar el primer hecho',
+    '  3. commit de .edgelore/           para que el equipo lo comparta',
     '',
     'Empieza por lo que ya os ha hecho perder tiempo: las conexiones que nadie',
     'recuerda. No intentes cubrir el proyecto entero de golpe.',
@@ -137,10 +137,10 @@ export function cmdInit(args, options) {
 function installHook(root, report, { force }) {
   const file = path.join(root, '.claude', 'settings.json');
   // Invocacion directa y portable: sin redirecciones de shell POSIX, que no
-  // funcionan en cmd.exe, y sin `|| true`, que convertiria un `nexo` ausente en
+  // funcionan en cmd.exe, y sin `|| true`, que convertiria un `edgelore` ausente en
   // un hook que no hace nada durante meses sin que nadie lo note. El propio
   // comando ya sale siempre con codigo 0, asi que no puede bloquear una edicion.
-  const hookCommand = 'nexo hook post-edit';
+  const hookCommand = 'edgelore hook post-edit';
 
   let settings = {};
   if (fs.existsSync(file)) {
@@ -155,7 +155,7 @@ function installHook(root, report, { force }) {
   settings.hooks ??= {};
   settings.hooks.PostToolUse ??= [];
   const already = settings.hooks.PostToolUse.some((entry) =>
-    (entry.hooks ?? []).some((hook) => typeof hook.command === 'string' && hook.command.includes('nexo hook')),
+    (entry.hooks ?? []).some((hook) => typeof hook.command === 'string' && hook.command.includes('edgelore hook')),
   );
   if (already && !force) {
     report.skipped.push(file);

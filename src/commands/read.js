@@ -29,7 +29,7 @@ import { changedSince, isGitRepo, lastCommitFor } from '../git.js';
 
 export function cmdQuery(args, options) {
   const id = args[0];
-  if (!id) throw new Error('Uso: nexo query <id>');
+  if (!id) throw new Error('Uso: edgelore query <id>');
   const root = requireStoreRoot();
   const index = loadIndex(root);
   const result = neighbourhood(index, id);
@@ -41,7 +41,7 @@ export function cmdQuery(args, options) {
       lines.push('', 'Quiza te refieres a:');
       hits.forEach((hit) => lines.push(`  ${hit.id}`));
     }
-    lines.push('', `Registralo con: nexo add ${id} --file <ruta> --kind <kind>`);
+    lines.push('', `Registralo con: edgelore add ${id} --file <ruta> --kind <kind>`);
     return { output: lines.join('\n'), code: 1 };
   }
 
@@ -51,7 +51,7 @@ export function cmdQuery(args, options) {
 
 export function cmdFind(args, options) {
   const term = args.join(' ');
-  if (!term) throw new Error('Uso: nexo find <texto>');
+  if (!term) throw new Error('Uso: edgelore find <texto>');
   const index = loadIndex(requireStoreRoot());
   const hits = search(index, term, { limit: options.limit ?? 20 });
   if (options.json) return { output: JSON.stringify(hits, null, 2) };
@@ -60,7 +60,7 @@ export function cmdFind(args, options) {
 
 export function cmdPath(args, options) {
   const [from, to] = args;
-  if (!from || !to) throw new Error('Uso: nexo path <desde> <hasta>');
+  if (!from || !to) throw new Error('Uso: edgelore path <desde> <hasta>');
   const index = loadIndex(requireStoreRoot());
   const steps = findPath(index, from, to);
   if (options.json) return { output: JSON.stringify(steps, null, 2), code: steps ? 0 : 1 };
@@ -82,11 +82,11 @@ export function cmdKinds(args, options) {
 
 export function cmdChecklist(args, options) {
   const kind = args[0];
-  if (!kind) throw new Error('Uso: nexo checklist <kind>   (lista los kinds con `nexo kinds`)');
+  if (!kind) throw new Error('Uso: edgelore checklist <kind>   (lista los kinds con `edgelore kinds`)');
   const catalog = kindCatalog(loadRules(requireStoreRoot()));
   const checklist = checklistFor(catalog, kind);
   if (!checklist) {
-    return { output: `Kind "${kind}" desconocido. Ejecuta \`nexo kinds\` para ver los disponibles.`, code: 1 };
+    return { output: `Kind "${kind}" desconocido. Ejecuta \`edgelore kinds\` para ver los disponibles.`, code: 1 };
   }
   if (options.json) return { output: JSON.stringify(checklist, null, 2) };
   return { output: renderChecklist(checklist) };
@@ -156,7 +156,7 @@ export function cmdStale(args, options) {
   if (stale.length) {
     lines.push(`${stale.length} hecho(s) por revisar (el codigo cambio despues de verificarlos):`);
     stale.forEach((entry) => lines.push(`  ${entry.id}\n    ${entry.file}  ${entry.since} -> ${entry.last}`));
-    lines.push('', 'Revisalo y confirma con: nexo verify <id>');
+    lines.push('', 'Revisalo y confirma con: edgelore verify <id>');
   }
   if (unverified.length) {
     lines.push('', `${unverified.length} hecho(s) sin verificar nunca:`);

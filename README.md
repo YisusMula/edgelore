@@ -1,4 +1,4 @@
-# Nexo
+# Edgelore
 
 **Índice curado de las referencias que tu código no declara.**
 
@@ -8,11 +8,11 @@ se invoca por su nombre en una cadena. Nada de eso aparece como una llamada en
 ningún sitio, así que `grep NombreDeLaClase` no lo encuentra — y quien pregunta
 «¿quién ejecuta esto?» se queda sin respuesta.
 
-Nexo es el sitio donde el equipo escribe esas conexiones, una vez, cuando las
-descubre. Vive en `.nexo/`, se versiona con git, y se consulta con una orden.
+Edgelore es el sitio donde el equipo escribe esas conexiones, una vez, cuando las
+descubre. Vive en `.edgelore/`, se versiona con git, y se consulta con una orden.
 
 ```
-$ nexo query Erp.Ui.DetallePage
+$ edgelore query Erp.Ui.DetallePage
 
 Erp.Ui.DetallePage  [maui-page]
   archivo: src/Ui/DetallePage.xaml.cs
@@ -42,16 +42,16 @@ el formato de un hecho no depende de ningún parser. Un monorepo con backend en
 Go, móvil en C# y web en TypeScript usa un único índice.
 
 **No sustituye a grep.** Para llamadas explícitas grep es más barato y siempre
-está al día. Nexo cubre lo que grep no puede ver:
+está al día. Edgelore cubre lo que grep no puede ver:
 
 | Pregunta | Herramienta |
 |---|---|
 | ¿Quién llama a este método? | grep |
-| ¿Quién ejecuta `OnAppearing` / `OnStart` / este job? | **nexo** |
-| ¿Qué ruta o literal resuelve a esta clase? | **nexo** |
-| ¿Quién consume este evento? | **nexo** |
-| ¿Quién escribe en esta tabla? | **nexo** |
-| ¿Qué se rompe si cambio esta clave de config? | **nexo** |
+| ¿Quién ejecuta `OnAppearing` / `OnStart` / este job? | **edgelore** |
+| ¿Qué ruta o literal resuelve a esta clase? | **edgelore** |
+| ¿Quién consume este evento? | **edgelore** |
+| ¿Quién escribe en esta tabla? | **edgelore** |
+| ¿Qué se rompe si cambio esta clave de config? | **edgelore** |
 
 **No es una red neuronal ni un índice vectorial.** Son ficheros Markdown con
 frontmatter y un CLI que los consulta. Sin embeddings, sin base de datos, sin
@@ -60,17 +60,20 @@ máquina porque no hay nada que pueda salir.
 
 ## Instalación
 
-Todavía no está publicado en npm. Se instala desde el repositorio:
+Todavía no está publicado en npm (el nombre está reservado pero sin publicar).
+Mientras tanto se instala desde el repositorio:
 
 ```bash
-git clone <url-de-este-repo> nexo && cd nexo && npm install -g .
+npm install -g github:YisusMula/graphifyLocal
 
 cd tu-repositorio
-nexo init --rules dotnet-core,dotnet-maui,dotnet-winservice,dotnet-data
-git add .nexo .claude && git commit -m "Añade índice Nexo"
+edgelore init --rules dotnet-core,dotnet-maui,dotnet-winservice,dotnet-data
+git add .edgelore .claude && git commit -m "Añade índice Edgelore"
 ```
 
-`nexo init` instala el almacén de hechos, las reglas del stack elegido, una
+Una vez publicado, `npm install -g edgelore`.
+
+`edgelore init` instala el almacén de hechos, las reglas del stack elegido, una
 skill de Claude Code y un hook `PostToolUse`. Requiere Node 20 o superior y
 nada más.
 
@@ -78,31 +81,31 @@ nada más.
 
 ```bash
 # consultar (antes de explorar el código)
-nexo query Erp.Ventas.PagoService     # nodo, aristas salientes y entrantes
-nexo find factura                     # cuando no sabes el id exacto
-nexo path AppShell Facturas           # cómo conecta A con B
+edgelore query Erp.Ventas.PagoService     # nodo, aristas salientes y entrantes
+edgelore find factura                     # cuando no sabes el id exacto
+edgelore path AppShell Facturas           # cómo conecta A con B
 
 # registrar (justo después de descubrir algo)
-nexo add Erp.Ui.DetallePage --file src/Ui/DetallePage.xaml.cs --kind maui-page
-nexo link AppShell Erp.Ui.DetallePage string-ref \
+edgelore add Erp.Ui.DetallePage --file src/Ui/DetallePage.xaml.cs --kind maui-page
+edgelore link AppShell Erp.Ui.DetallePage string-ref \
   --at src/AppShell.xaml.cs:42 --note 'registrada como ruta "detalle"'
 
 # mantener
-nexo stale                            # hechos cuyo código cambió tras verificarlos
-nexo verify Erp.Ui.DetallePage        # confirmarlo en el commit actual
-nexo validate --strict                # coherencia del índice; para CI
-nexo stats                            # cobertura
+edgelore stale                            # hechos cuyo código cambió tras verificarlos
+edgelore verify Erp.Ui.DetallePage        # confirmarlo en el commit actual
+edgelore validate --strict                # coherencia del índice; para CI
+edgelore stats                            # cobertura
 ```
 
-`nexo kinds` lista los tipos de nodo que conocen las reglas activas, y
-`nexo checklist <kind>` te dice qué comprobar al registrar uno.
+`edgelore kinds` lista los tipos de nodo que conocen las reglas activas, y
+`edgelore checklist <kind>` te dice qué comprobar al registrar uno.
 
 ## Cómo crece solo
 
 Declarar el `kind` de un nodo aplica las reglas del framework de una vez:
 
 ```
-$ nexo add Erp.Ui.DetallePage --file src/Ui/DetallePage.xaml.cs --kind maui-page
+$ edgelore add Erp.Ui.DetallePage --file src/Ui/DetallePage.xaml.cs --kind maui-page
 
 Aristas añadidas por la regla del kind "maui-page":
   lifecycle   Erp.Ui.DetallePage.ctor
@@ -112,7 +115,7 @@ Aristas añadidas por la regla del kind "maui-page":
 ```
 
 Cuarenta páginas, cuarenta veces, sin escribir una sola arista a mano. Las
-reglas se declaran una vez en `.nexo/rules/*.yaml` y se versionan con el repo.
+reglas se declaran una vez en `.edgelore/rules/*.yaml` y se versionan con el repo.
 
 El hook cierra el círculo: cuando alguien edita un fichero que ya tiene hechos
 registrados, Claude recibe un aviso con lo que hay y con qué confirmar. El
@@ -127,7 +130,7 @@ momento en que registrar un hallazgo es barato es justo después de descubrirlo.
   toca un único fichero.
 - **Serialización determinista.** Las claves salen siempre en el mismo orden, así
   que los diffs muestran el cambio real y no una reordenación.
-- **`nexo validate` en CI.** Es la única defensa automática contra que el índice
+- **`edgelore validate` en CI.** Es la única defensa automática contra que el índice
   acumule mentiras.
 
 ## Lo que va a doler
@@ -139,7 +142,7 @@ Dicho ahora y no dentro de tres meses:
   entero.
 - **Un hecho obsoleto es peor que ninguno**, porque se lee con confianza. Por eso
   cada hecho lleva `confidence` y el commit en que se verificó, y por eso existe
-  `nexo stale`. La disciplina no es opcional.
+  `edgelore stale`. La disciplina no es opcional.
 - **Depende del equipo.** El hook ayuda, pero si nadie registra nada, no hay
   índice. Empieza con dos o tres personas y las conexiones que más escuecen.
 
