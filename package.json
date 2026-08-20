@@ -31,11 +31,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YisusMula/graphifyLocal.git"
+    "url": "git+https://github.com/YisusMula/edgelore.git"
   },
-  "homepage": "https://github.com/YisusMula/graphifyLocal#readme",
+  "homepage": "https://github.com/YisusMula/edgelore#readme",
   "bugs": {
-    "url": "https://github.com/YisusMula/graphifyLocal/issues"
+    "url": "https://github.com/YisusMula/edgelore/issues"
   },
   "publishConfig": {
     "access": "public"

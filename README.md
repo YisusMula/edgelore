@@ -64,7 +64,7 @@ Todavía no está publicado en npm (el nombre está reservado pero sin publicar)
 Mientras tanto se instala desde el repositorio:
 
 ```bash
-npm install -g github:YisusMula/graphifyLocal
+npm install -g github:YisusMula/edgelore
 
 cd tu-repositorio
 edgelore init
