@@ -7,6 +7,7 @@
  * dependencias se notaria en cada guardado.
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cmdQuery, cmdImpact, cmdFind, cmdPath, cmdStats, cmdKinds, cmdChecklist, cmdValidate, cmdStale } from '../src/commands/read.js';
@@ -147,9 +148,28 @@ async function main() {
   return result?.code ?? 0;
 }
 
-// Solo se ejecuta al invocarse como binario: los tests importan parseArgs desde
-// aqui, y sin esta guarda el proceso de pruebas terminaria al cargar el modulo.
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+/**
+ * true solo cuando este fichero se ejecuta como binario.
+ *
+ * La guarda existe porque los tests importan parseArgs desde aqui y, sin ella,
+ * el proceso de pruebas terminaria al cargar el modulo. Pero comparar rutas a
+ * secas no vale: npm instala el binario como un SYMLINK, de modo que argv[1] es
+ * la ruta del enlace y import.meta.url la real. Sin resolver el enlace, la
+ * comparacion falla siempre y el CLI instalado no ejecuta nada, saliendo con
+ * codigo 0 en cada orden como si hubiera funcionado.
+ */
+function isMainModule() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const self = fileURLToPath(import.meta.url);
+  try {
+    return fs.realpathSync(entry) === fs.realpathSync(self);
+  } catch {
+    return path.resolve(entry) === self;
+  }
+}
+
+if (isMainModule()) {
   main()
     .then((code) => process.exit(code))
     .catch((error) => {
