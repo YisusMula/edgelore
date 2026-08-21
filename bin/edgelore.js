@@ -104,6 +104,8 @@ OPCIONES COMUNES
   --strict        En validate, exige ficha propia para todo id referenciado.
   --unverified    Al escribir, no sella el hecho como verificado.
   --confidence X  certain, likely o unverified.
+  --all           En query/impact, lista todas las dependencias sin recortar.
+  --limit N       Cuantas listar por nivel antes de resumir (por defecto 12).
 
 CONFIANZA POR DEFECTO
   edgelore link         certain      es una afirmacion deliberada sobre una relacion

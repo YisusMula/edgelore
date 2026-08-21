@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { loadIndex, writeNode, readNode, findStoreRoot, incomingEdges, danglingIds } from '../src/store.js';
-import { neighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact } from '../src/query.js';
+import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact } from '../src/query.js';
 import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
@@ -563,4 +563,74 @@ test('rules list muestra instaladas y disponibles', () => {
   const salida = cmdRules(['list'], { dir: root }).output;
   assert.match(salida, /dotnet-maui/);
   assert.match(salida, /Disponibles para anadir/);
+});
+
+/** Nodo del que dependen `n` nodos: el caso que dispara el gasto de tokens. */
+function hubCon(n) {
+  const root = sandbox();
+  for (let i = 0; i < n; i += 1) {
+    writeNode(root, { id: `Dep${i}`, edges: [{ to: 'Hub', type: 'calls' }] });
+  }
+  writeNode(root, { id: 'Hub', edges: [] });
+  return root;
+}
+
+test('impact acota la salida en un nodo con cientos de dependientes', () => {
+  // Regresion: sin tope, un hub de 400 dependientes generaba ~7.800 tokens en
+  // una sola consulta, y ese mismo texto lo inyecta el hook previo a la edicion.
+  const index = loadIndex(hubCon(300));
+  const texto = renderImpact(impact(index, 'Hub'), index);
+  assert.ok(texto.length < 3000, `salida de ${texto.length} caracteres; deberia ir acotada`);
+  assert.match(texto, /DEPENDEN DIRECTAMENTE \(300\)/, 'el total real se sigue viendo');
+  assert.match(texto, /\.\.\. y \d+ mas: calls \d+/, 'lo omitido se resume por tipo');
+});
+
+test('--all devuelve el listado entero cuando se pide', () => {
+  const index = loadIndex(hubCon(300));
+  const acotado = renderImpact(impact(index, 'Hub'), index);
+  const completo = renderImpact(impact(index, 'Hub'), index, { limit: 0 });
+  assert.ok(completo.length > acotado.length * 3);
+  assert.match(completo, /Dep299/);
+});
+
+test('query tambien acota las aristas entrantes de un hub', () => {
+  const index = loadIndex(hubCon(300));
+  const texto = renderNeighbourhood(neighbourhood(index, 'Hub'));
+  assert.ok(texto.length < 2000, `salida de ${texto.length} caracteres`);
+  assert.match(texto, /LLEGA DESDE \(300\)/);
+});
+
+test('un nodo corriente no se ve afectado por el tope', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'A', edges: [{ to: 'B', type: 'calls' }] });
+  writeNode(root, { id: 'B', edges: [] });
+  const index = loadIndex(root);
+  const texto = renderNeighbourhood(neighbourhood(index, 'B'));
+  assert.match(texto, /\bA\b/);
+  assert.ok(!texto.includes('... y'), 'no debe aparecer resumen si no se recorta nada');
+});
+
+test('cada dependiente se reporta una sola vez, a su distancia mas corta', () => {
+  // Regresion: un nodo alcanzable por varias rutas salia repetido en niveles
+  // sucesivos, inflando la salida sin anadir informacion.
+  const root = sandbox();
+  writeNode(root, { id: 'Directo', edges: [{ to: 'Objetivo', type: 'calls' }] });
+  writeNode(root, { id: 'Intermedio', edges: [{ to: 'Objetivo', type: 'calls' }] });
+  writeNode(root, { id: 'Objetivo', edges: [] });
+  // Directo tambien es alcanzable a traves de Intermedio.
+  writeNode(root, { id: 'Directo2', edges: [{ to: 'Intermedio', type: 'calls' }] });
+  writeNode(root, { id: 'Intermedio2', edges: [{ to: 'Directo', type: 'calls' }] });
+
+  const resultado = impact(loadIndex(root), 'Objetivo');
+  const apariciones = resultado.levels.flatMap((nivel) => nivel.entries.map((e) => e.id));
+  assert.equal(new Set(apariciones).size, apariciones.length, 'ningun nodo debe repetirse entre niveles');
+});
+
+test('el aviso del hook es mas estricto que una consulta a mano', () => {
+  const root = hubCon(300);
+  writeNode(root, { id: 'Hub', file: 'src/hub.cs', edges: [] });
+  const index = loadIndex(root);
+  const aviso = buildImpactNotice(root, index, [path.join(root, 'src/hub.cs')]);
+  // Entra en el contexto sin que nadie lo pida: debe ser minusculo.
+  assert.ok(aviso.length < 1500, `el aviso automatico ocupa ${aviso.length} caracteres`);
 });

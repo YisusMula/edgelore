@@ -92,6 +92,9 @@ export function buildNotice(root, index, files, { git = false } = {}) {
  * indice queda en manos de quien escribe el prompt, y eso es justo lo que se
  * olvida cuando hay prisa.
  */
+const HOOK_LEVEL_LIMIT = 5;
+const HOOK_MAX_NODES = 2;
+
 export function buildImpactNotice(root, index, files, { maxDepth = 3 } = {}) {
   const tracked = files
     .map((file) => path.relative(root, path.resolve(root, file)).split(path.sep).join('/'))
@@ -106,12 +109,19 @@ export function buildImpactNotice(root, index, files, { maxDepth = 3 } = {}) {
   }
   if (!affected.length) return null;
 
+  // Mas estricto que una consulta a mano: este aviso entra en el contexto sin
+  // que nadie lo haya pedido, asi que da la senal y deja el detalle a demanda.
   const lines = ['Edgelore: lo que vas a editar tiene dependencias registradas.'];
-  for (const result of affected.slice(0, 3)) {
-    lines.push('', renderImpact(result, index));
+  for (const result of affected.slice(0, HOOK_MAX_NODES)) {
+    lines.push('', renderImpact(result, index, { limit: HOOK_LEVEL_LIMIT }));
   }
-  if (affected.length > 3) {
-    lines.push('', `... y ${affected.length - 3} nodo(s) mas en este fichero. Consulta: edgelore impact <id>`);
+  if (affected.length > HOOK_MAX_NODES) {
+    const resto = affected.slice(HOOK_MAX_NODES);
+    lines.push(
+      '',
+      `... y ${resto.length} nodo(s) mas en este fichero: ${resto.map((r) => r.id).join(', ')}`,
+      'Consulta cualquiera con: edgelore impact <id>',
+    );
   }
   return lines.join('\n');
 }

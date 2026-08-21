@@ -19,6 +19,30 @@ export function isHiddenEdge(edge) {
   return HIDDEN_TYPES.has(edge.type);
 }
 
+/**
+ * Cuantas dependencias se listan por nivel antes de resumir.
+ *
+ * Sin tope, un nodo del que dependen cientos de cosas -un servicio de auditoria,
+ * una tabla compartida- produce miles de tokens en una sola consulta y el indice
+ * pasa a costar mas de lo que ahorra. Ademas `impact` alimenta el hook previo a
+ * la edicion, que se dispara solo: ahi el tope no es una comodidad, es lo que
+ * impide inyectar contexto que nadie ha pedido.
+ *
+ * Cuando se recorta, se muestra el recuento por tipo. Para decidir si un cambio
+ * es arriesgado, "380 cosas leen esto" es el dato accionable; los nombres solo
+ * importan si vas a inspeccionarlos, y para eso esta --all.
+ */
+const DEFAULT_LEVEL_LIMIT = 12;
+
+function typeHistogram(entries) {
+  const counts = {};
+  for (const entry of entries) counts[entry.type] = (counts[entry.type] ?? 0) + 1;
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([type, count]) => `${type} ${count}`)
+    .join(', ');
+}
+
 function formatEdge(edge, { direction }) {
   const peer = direction === 'in' ? edge.from : edge.to;
   const parts = [`  ${edge.type.padEnd(11)} ${peer}`];
@@ -44,7 +68,18 @@ export function neighbourhood(index, id) {
   return { id, node, outgoing: node?.edges ?? [], incoming };
 }
 
-export function renderNeighbourhood(result, { notes = true } = {}) {
+/** Recorta una lista de aristas y devuelve las lineas del resumen omitido. */
+function renderEdgeList(edges, direction, limit) {
+  const cap = limit > 0 ? limit : edges.length;
+  const lines = edges.slice(0, cap).map((edge) => formatEdge(edge, { direction }));
+  if (edges.length > cap) {
+    const resto = edges.slice(cap);
+    lines.push(`  ... y ${resto.length} mas: ${typeHistogram(resto)}`);
+  }
+  return lines;
+}
+
+export function renderNeighbourhood(result, { notes = true, limit = DEFAULT_LEVEL_LIMIT } = {}) {
   const lines = [];
   const { id, node, outgoing, incoming } = result;
 
@@ -63,12 +98,12 @@ export function renderNeighbourhood(result, { notes = true } = {}) {
 
   if (outgoing.length) {
     lines.push('', `SALE HACIA (${outgoing.length}):`);
-    outgoing.forEach((edge) => lines.push(formatEdge(edge, { direction: 'out' })));
+    lines.push(...renderEdgeList(outgoing, 'out', limit));
   }
 
   if (incoming.length) {
     lines.push('', `LLEGA DESDE (${incoming.length}):`);
-    incoming.forEach((edge) => lines.push(formatEdge(edge, { direction: 'in' })));
+    lines.push(...renderEdgeList(incoming, 'in', limit));
   }
 
   if (!outgoing.length && !incoming.length) {
@@ -169,7 +204,11 @@ export function renderPath(steps, fromId, toId) {
  */
 export function impact(index, id, { maxDepth = 4 } = {}) {
   const levels = [];
-  const reached = new Set([id]);
+  // Profundidad a la que se alcanzo cada nodo por primera vez. Cada dependiente
+  // se reporta UNA sola vez, a su distancia mas corta: volver a listarlo mas
+  // abajo solo infla la salida sin anadir informacion, y la distancia corta es
+  // la que importa para juzgar el riesgo.
+  const reachedAt = new Map([[id, 0]]);
   const recorded = new Set();
   let frontier = [id];
 
@@ -179,9 +218,11 @@ export function impact(index, id, { maxDepth = 4 } = {}) {
 
     for (const current of frontier) {
       for (const edge of incomingEdges(index, current)) {
-        // Se registra la arista aunque el nodo ya se haya alcanzado por otra
-        // via: dos caminos distintos hacia el mismo sitio son dos motivos
-        // distintos por los que un cambio puede romperlo.
+        const previo = reachedAt.get(edge.from);
+        if (previo !== undefined && previo < depth) continue;
+
+        // Dentro de un mismo nivel si se admiten varias aristas hacia el mismo
+        // nodo: son motivos distintos por los que un cambio puede romperlo.
         const key = `${edge.from}|${current}|${edge.type}`;
         if (!recorded.has(key)) {
           recorded.add(key);
@@ -196,8 +237,8 @@ export function impact(index, id, { maxDepth = 4 } = {}) {
             hidden: isHiddenEdge(edge),
           });
         }
-        if (!reached.has(edge.from)) {
-          reached.add(edge.from);
+        if (!reachedAt.has(edge.from)) {
+          reachedAt.set(edge.from, depth);
           next.push(edge.from);
         }
       }
@@ -211,10 +252,10 @@ export function impact(index, id, { maxDepth = 4 } = {}) {
   }
 
   const hidden = levels.reduce((total, level) => total + level.entries.filter((e) => e.hidden).length, 0);
-  return { id, levels, affected: reached.size - 1, hidden, truncated: frontier.length > 0, known: index.nodes.has(id) };
+  return { id, levels, affected: reachedAt.size - 1, hidden, truncated: frontier.length > 0, known: index.nodes.has(id) };
 }
 
-export function renderImpact(result, index) {
+export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT } = {}) {
   const lines = [`ALCANCE DE ${result.id}`];
 
   if (!result.known) {
@@ -233,8 +274,15 @@ export function renderImpact(result, index) {
   );
 
   for (const level of result.levels) {
-    lines.push('', level.depth === 1 ? 'DEPENDEN DIRECTAMENTE:' : `A ${level.depth} SALTOS:`);
-    for (const entry of level.entries) {
+    const total = level.entries.length;
+    const cap = limit > 0 ? limit : total;
+    // Las ocultas a grep van primero (impact ya las ordena asi), de modo que si
+    // hay que recortar se conservan justo las que nadie encontraria por su cuenta.
+    const shown = level.entries.slice(0, cap);
+    const header = level.depth === 1 ? 'DEPENDEN DIRECTAMENTE' : `A ${level.depth} SALTOS`;
+    lines.push('', `${header} (${total}):`);
+
+    for (const entry of shown) {
       const mark = entry.hidden ? ' <- OCULTA A GREP' : '';
       const doubt = entry.confidence === 'certain' ? '' : ` ~${entry.confidence}`;
       lines.push(`  ${entry.type.padEnd(11)} ${entry.id}${mark}${doubt}`);
@@ -245,10 +293,21 @@ export function renderImpact(result, index) {
       if (entry.note) detail.push(entry.note);
       if (detail.length) lines.push(`${' '.repeat(14)}${detail.join(' | ')}`);
     }
+
+    if (total > shown.length) {
+      const resto = level.entries.slice(shown.length);
+      const ocultas = resto.filter((entry) => entry.hidden).length;
+      lines.push(
+        `  ... y ${resto.length} mas${ocultas ? ` (${ocultas} ocultas a grep)` : ''}: ${typeHistogram(resto)}`,
+      );
+    }
   }
 
   if (result.truncated) {
-    lines.push('', `Hay mas dependencias mas alla de la profundidad consultada. Usa --depth para ampliar.`);
+    lines.push('', 'Hay mas dependencias mas alla de la profundidad consultada. Usa --depth para ampliar.');
+  }
+  if (limit > 0 && result.levels.some((level) => level.entries.length > limit)) {
+    lines.push('Listado recortado. Para verlo entero: --all (o --json para procesarlo).');
   }
   lines.push('', coverageWarning(index));
   return lines.join('\n');

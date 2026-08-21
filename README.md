@@ -32,6 +32,12 @@ LLEGA DESDE (1):
 Eso son unos 300 tokens. Reconstruirlo a mano son diez búsquedas fallidas,
 tres ficheros leídos enteros y, con frecuencia, una respuesta incompleta.
 
+**Coste medido** sobre un índice de 2.000 nodos: una consulta normal ocupa ~50
+tokens, y un nodo del que dependen 400 cosas ocupa ~90 en `query` y ~233 en
+`impact`. El listado se recorta y se resume por tipo — «y 388 más: calls 388» —
+porque para juzgar el riesgo el dato accionable es *cuántos*, no sus nombres.
+`--all` lo devuelve entero cuando de verdad hace falta.
+
 ## Qué no es
 
 **No es un extractor automático.** No parsea tu código ni intenta adivinar nada.
@@ -154,6 +160,10 @@ Los dos hooks cierran el círculo sin depender de que nadie se acuerde:
   que los diffs muestran el cambio real y no una reordenación.
 - **`edgelore validate` en CI.** Es la única defensa automática contra que el índice
   acumule mentiras.
+- **La salida está acotada por diseño.** Ningún comando puede devolver miles de
+  líneas: el índice deja de ahorrar en el momento en que una consulta cuesta más
+  que la búsqueda que evita. El hook automático es aún más estricto, porque su
+  contexto entra sin que nadie lo pida.
 
 ## Lo que va a doler
 
@@ -170,7 +180,7 @@ Dicho ahora y no dentro de tres meses:
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 85 pruebas).
+v0.1. El núcleo curado está completo y probado (`npm test`, 91 pruebas).
 
 Siguiente paso previsto: un extractor opcional basado en Roslyn que emita hechos
 en este mismo formato con `source: extractor:roslyn`, para poblar las aristas

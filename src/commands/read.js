@@ -48,7 +48,7 @@ export function cmdQuery(args, options) {
   }
 
   if (options.json) return { output: JSON.stringify(result, null, 2) };
-  return { output: renderNeighbourhood(result, { notes: !options.brief }) };
+  return { output: renderNeighbourhood(result, { notes: !options.brief, limit: options.all ? 0 : options.limit }) };
 }
 
 /**
@@ -75,7 +75,7 @@ export function cmdImpact(args, options) {
     lines.push('', 'Sin datos no se puede acotar el alcance: usa grep y registra lo que descubras.');
     return { output: lines.join('\n'), code: 1 };
   }
-  return { output: renderImpact(result, index) };
+  return { output: renderImpact(result, index, { limit: options.all ? 0 : options.limit }) };
 }
 
 export function cmdFind(args, options) {
