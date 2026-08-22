@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { loadIndex, writeNode, readNode, findStoreRoot, incomingEdges, danglingIds } from '../src/store.js';
-import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact } from '../src/query.js';
+import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact, moduleOf } from '../src/query.js';
 import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
@@ -582,7 +582,7 @@ test('impact acota la salida en un nodo con cientos de dependientes', () => {
   const texto = renderImpact(impact(index, 'Hub'), index);
   assert.ok(texto.length < 3000, `salida de ${texto.length} caracteres; deberia ir acotada`);
   assert.match(texto, /DEPENDEN DIRECTAMENTE \(300\)/, 'el total real se sigue viendo');
-  assert.match(texto, /\.\.\. y \d+ mas: calls \d+/, 'lo omitido se resume por tipo');
+  assert.match(texto, /reparto por modulo/, 'con muchos dependientes se reparte, no se lista');
 });
 
 test('--all devuelve el listado entero cuando se pide', () => {
@@ -633,4 +633,60 @@ test('el aviso del hook es mas estricto que una consulta a mano', () => {
   const aviso = buildImpactNotice(root, index, [path.join(root, 'src/hub.cs')]);
   // Entra en el contexto sin que nadie lo pida: debe ser minusculo.
   assert.ok(aviso.length < 1500, `el aviso automatico ocupa ${aviso.length} caracteres`);
+});
+
+test('moduleOf deduce el modulo de un id jerarquico', () => {
+  assert.equal(moduleOf('Erp.Ventas.Pagina7.OnAppearing'), 'Erp.Ventas');
+  assert.equal(moduleOf('Lib.Core.Guard'), 'Lib.Core');
+  assert.equal(moduleOf('Auditoria'), 'Auditoria');
+  assert.equal(moduleOf('Base.Ui'), 'Base');
+});
+
+test('el reparto por modulo no oculta modulos enteros por orden alfabetico', () => {
+  // Regresion: listar los primeros N por orden alfabetico hacia que en un
+  // monorepo salieran todos del mismo modulo, y quien lo leia concluia que el
+  // cambio solo afectaba a ese. Es peor que no decir nada.
+  const root = sandbox();
+  for (const modulo of ['Erp.Almacen', 'Erp.Compras', 'Erp.Ventas']) {
+    for (let i = 0; i < 100; i += 1) {
+      writeNode(root, { id: `${modulo}.Pagina${i}`, edges: [{ to: 'Base.PageBase', type: 'implements' }] });
+    }
+  }
+  writeNode(root, { id: 'Base.PageBase', edges: [] });
+
+  const index = loadIndex(root);
+  const texto = renderImpact(impact(index, 'Base.PageBase'), index);
+  for (const modulo of ['Erp.Almacen', 'Erp.Compras', 'Erp.Ventas']) {
+    assert.match(texto, new RegExp(modulo.replace('.', '\\.')), `${modulo} debe aparecer en el reparto`);
+  }
+  assert.match(texto, /DEPENDEN DIRECTAMENTE \(300\)/);
+});
+
+test('el disparador comun se escribe una vez, no por cada linea', () => {
+  const root = sandbox();
+  for (let i = 0; i < 50; i += 1) {
+    writeNode(root, {
+      id: `Erp.Mod.Pagina${i}`,
+      edges: [{ to: 'Objetivo', type: 'lifecycle', trigger: 'el runtime la invoca al hacerse visible' }],
+    });
+  }
+  writeNode(root, { id: 'Objetivo', edges: [] });
+  const index = loadIndex(root);
+  const texto = renderImpact(impact(index, 'Objetivo'), index);
+  const veces = texto.split('el runtime la invoca al hacerse visible').length - 1;
+  assert.equal(veces, 1, 'el trigger compartido no debe repetirse por cada dependiente');
+});
+
+test('query reparte por modulo cuando un nodo tiene muchos vecinos', () => {
+  const root = sandbox();
+  for (const modulo of ['Erp.A', 'Erp.B']) {
+    for (let i = 0; i < 40; i += 1) {
+      writeNode(root, { id: `${modulo}.S${i}`, edges: [{ to: 'Compartido', type: 'calls' }] });
+    }
+  }
+  writeNode(root, { id: 'Compartido', edges: [] });
+  const texto = renderNeighbourhood(neighbourhood(loadIndex(root), 'Compartido'));
+  assert.match(texto, /reparto por modulo \(80\)/);
+  assert.match(texto, /Erp\.A/);
+  assert.match(texto, /Erp\.B/);
 });

@@ -32,11 +32,30 @@ LLEGA DESDE (1):
 Eso son unos 300 tokens. Reconstruirlo a mano son diez búsquedas fallidas,
 tres ficheros leídos enteros y, con frecuencia, una respuesta incompleta.
 
-**Coste medido** sobre un índice de 2.000 nodos: una consulta normal ocupa ~50
-tokens, y un nodo del que dependen 400 cosas ocupa ~90 en `query` y ~233 en
-`impact`. El listado se recorta y se resume por tipo — «y 388 más: calls 388» —
-porque para juzgar el riesgo el dato accionable es *cuántos*, no sus nombres.
-`--all` lo devuelve entero cuando de verdad hace falta.
+**Coste medido** sobre un monorepo sintético de 3.076 nodos y 8.408 aristas
+(librería compartida → proyecto base → cuatro verticales encima):
+
+| Consulta | Tokens |
+|---|---|
+| Un nodo cualquiera | ~60 |
+| Un método base sobrescrito por 880 páginas | ~430 |
+| Una utilidad de la librería de la que dependen 2.177 nodos | ~426 |
+
+El coste **no crece con el tamaño del repositorio**: crece con la forma de la
+respuesta, y ésa está acotada. Cuando hay muchos dependientes no se listan
+nombres, se reparten por módulo:
+
+```
+DEPENDEN DIRECTAMENTE (880) - reparto por modulo:
+  implements  Erp.Almacen          220   ej. Erp.Almacen.Pagina0.OnAppearing
+  implements  Erp.Compras          220   ej. Erp.Compras.Pagina0.OnAppearing
+  implements  Erp.Contabilidad     220   ej. Erp.Contabilidad.Pagina0.OnAppearing
+  implements  Erp.Ventas           220   ej. Erp.Ventas.Pagina0.OnAppearing
+```
+
+Eso dice qué hay que probar. Una lista recortada de los doce primeros nombres,
+en cambio, saldría entera del módulo que empieza por «a» y haría creer que el
+cambio solo afecta a ése. `--all` devuelve el listado completo cuando hace falta.
 
 ## Qué no es
 
@@ -180,7 +199,7 @@ Dicho ahora y no dentro de tres meses:
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 91 pruebas).
+v0.1. El núcleo curado está completo y probado (`npm test`, 95 pruebas).
 
 Siguiente paso previsto: un extractor opcional basado en Roslyn que emita hechos
 en este mismo formato con `source: extractor:roslyn`, para poblar las aristas

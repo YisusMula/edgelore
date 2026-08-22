@@ -33,6 +33,38 @@ export function isHiddenEdge(edge) {
  * importan si vas a inspeccionarlos, y para eso esta --all.
  */
 const DEFAULT_LEVEL_LIMIT = 12;
+/** Cuantos grupos modulo+tipo se listan antes de resumirlos tambien. */
+const GROUP_LIMIT = 10;
+
+/**
+ * Modulo al que pertenece un id, por convencion de nombres jerarquicos:
+ * `Erp.Ventas.Pagina7.OnAppearing` -> `Erp.Ventas`, `Auditoria` -> `Auditoria`.
+ */
+export function moduleOf(id) {
+  const parts = String(id).split('.');
+  return parts.length <= 2 ? parts[0] : parts.slice(0, 2).join('.');
+}
+
+/**
+ * Agrupa dependientes por tipo de arista y modulo, de mayor a menor.
+ *
+ * En un producto con libreria, proyecto base y verticales encima, listar los
+ * primeros N nombres es peor que inutil: el orden alfabetico hace que salgan
+ * todos del mismo modulo y quien lo lee concluye que el cambio solo afecta a
+ * ese. El dato que permite decidir que probar es cuantos hay en cada modulo.
+ */
+function groupByModule(entries) {
+  const groups = new Map();
+  for (const entry of entries) {
+    const modulo = moduleOf(entry.id);
+    const key = `${entry.type}|${modulo}`;
+    if (!groups.has(key)) groups.set(key, { type: entry.type, modulo, items: [] });
+    groups.get(key).items.push(entry);
+  }
+  return [...groups.values()].sort(
+    (a, b) => b.items.length - a.items.length || a.modulo.localeCompare(b.modulo),
+  );
+}
 
 function typeHistogram(entries) {
   const counts = {};
@@ -68,13 +100,31 @@ export function neighbourhood(index, id) {
   return { id, node, outgoing: node?.edges ?? [], incoming };
 }
 
-/** Recorta una lista de aristas y devuelve las lineas del resumen omitido. */
+/**
+ * Lista las aristas, o las reparte por modulo cuando son demasiadas. Mismo
+ * criterio que en `impact`: con muchos vecinos, el reparto informa y la lista
+ * recortada engana.
+ */
 function renderEdgeList(edges, direction, limit) {
-  const cap = limit > 0 ? limit : edges.length;
-  const lines = edges.slice(0, cap).map((edge) => formatEdge(edge, { direction }));
-  if (edges.length > cap) {
-    const resto = edges.slice(cap);
-    lines.push(`  ... y ${resto.length} mas: ${typeHistogram(resto)}`);
+  if (limit <= 0 || edges.length <= limit) {
+    return edges.map((edge) => formatEdge(edge, { direction }));
+  }
+  const groups = groupByModule(edges.map((edge) => ({
+    id: direction === 'in' ? edge.from : edge.to,
+    type: edge.type,
+    hidden: isHiddenEdge(edge),
+  })));
+  const ancho = String(edges.length).length;
+  const lines = [`  reparto por modulo (${edges.length}):`];
+  for (const group of groups.slice(0, GROUP_LIMIT)) {
+    lines.push(
+      `  ${group.type.padEnd(11)} ${group.modulo.padEnd(20)} ${String(group.items.length).padStart(ancho)}` +
+        `   ej. ${group.items[0].id}`,
+    );
+  }
+  if (groups.length > GROUP_LIMIT) {
+    const resto = groups.slice(GROUP_LIMIT);
+    lines.push(`  ... y ${resto.reduce((n, g) => n + g.items.length, 0)} en ${resto.length} grupo(s) mas`);
   }
   return lines;
 }
@@ -275,31 +325,49 @@ export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT } = {}
 
   for (const level of result.levels) {
     const total = level.entries.length;
-    const cap = limit > 0 ? limit : total;
-    // Las ocultas a grep van primero (impact ya las ordena asi), de modo que si
-    // hay que recortar se conservan justo las que nadie encontraria por su cuenta.
-    const shown = level.entries.slice(0, cap);
     const header = level.depth === 1 ? 'DEPENDEN DIRECTAMENTE' : `A ${level.depth} SALTOS`;
-    lines.push('', `${header} (${total}):`);
 
-    for (const entry of shown) {
-      const mark = entry.hidden ? ' <- OCULTA A GREP' : '';
-      const doubt = entry.confidence === 'certain' ? '' : ` ~${entry.confidence}`;
-      lines.push(`  ${entry.type.padEnd(11)} ${entry.id}${mark}${doubt}`);
-      const detail = [];
-      if (entry.via) detail.push(`a traves de ${entry.via}`);
-      if (entry.trigger) detail.push(entry.trigger);
-      if (entry.at) detail.push(`en ${entry.at}`);
-      if (entry.note) detail.push(entry.note);
-      if (detail.length) lines.push(`${' '.repeat(14)}${detail.join(' | ')}`);
+    // Pocos dependientes: se listan uno a uno, con todo el detalle.
+    if (limit <= 0 || total <= limit) {
+      lines.push('', `${header} (${total}):`);
+      for (const entry of level.entries) {
+        const mark = entry.hidden ? ' <- OCULTA A GREP' : '';
+        const doubt = entry.confidence === 'certain' ? '' : ` ~${entry.confidence}`;
+        lines.push(`  ${entry.type.padEnd(11)} ${entry.id}${mark}${doubt}`);
+        const detail = [];
+        if (entry.via) detail.push(`a traves de ${entry.via}`);
+        if (entry.trigger) detail.push(entry.trigger);
+        if (entry.at) detail.push(`en ${entry.at}`);
+        if (entry.note) detail.push(entry.note);
+        if (detail.length) lines.push(`${' '.repeat(14)}${detail.join(' | ')}`);
+      }
+      continue;
     }
 
-    if (total > shown.length) {
-      const resto = level.entries.slice(shown.length);
-      const ocultas = resto.filter((entry) => entry.hidden).length;
+    // Muchos: el reparto por modulo dice lo que hay que probar; una lista de
+    // nombres recortada solo diria de que modulo empiezan por la "a".
+    const groups = groupByModule(level.entries);
+    lines.push('', `${header} (${total}) - reparto por modulo:`);
+    for (const group of groups.slice(0, GROUP_LIMIT)) {
+      const ocultas = group.items.filter((item) => item.hidden).length;
+      const marca = ocultas === group.items.length ? '  <- OCULTAS A GREP' : ocultas ? `  (${ocultas} ocultas)` : '';
+      const ancho = String(total).length;
       lines.push(
-        `  ... y ${resto.length} mas${ocultas ? ` (${ocultas} ocultas a grep)` : ''}: ${typeHistogram(resto)}`,
+        `  ${group.type.padEnd(11)} ${group.modulo.padEnd(20)} ${String(group.items.length).padStart(ancho)}` +
+          `   ej. ${group.items[0].id}${marca}`,
       );
+    }
+    if (groups.length > GROUP_LIMIT) {
+      const resto = groups.slice(GROUP_LIMIT);
+      const nodos = resto.reduce((suma, group) => suma + group.items.length, 0);
+      lines.push(`  ... y ${nodos} en ${resto.length} grupo(s) mas: ${resto.slice(0, 8).map((g) => g.modulo).join(', ')}`);
+    }
+
+    // El disparador suele ser identico en todo el grupo (lo pone la misma regla):
+    // repetirlo por cada linea es puro relleno.
+    const triggers = new Set(level.entries.map((entry) => entry.trigger).filter(Boolean));
+    if (triggers.size === 1 && level.entries.every((entry) => entry.trigger)) {
+      lines.push(`${' '.repeat(14)}todas disparadas por: ${[...triggers][0]}`);
     }
   }
 
