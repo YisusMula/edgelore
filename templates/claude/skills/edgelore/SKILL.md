@@ -26,14 +26,28 @@ siempre, incluso cuando nadie lo pida explicitamente. Si el usuario dice
 "comprueba que no rompa nada", "cambia esto", "modifica X" o "refactoriza",
 esto es lo primero que haces.
 
+Son dos pasos, y hacen falta los dos:
+
 ```
-edgelore impact <Id>             # que depende de esto, de forma transitiva
-edgelore impact <Id> --depth 6   # ampliar el radio
+# 1. ORIENTARSE: cuanto alcanza y por donde. Barato, siempre primero.
+edgelore impact <Id>
+
+# 2. LISTA DE TRABAJO: los ficheros concretos que hay que revisar.
+edgelore impact <Id> --files --depth 1
+edgelore impact <Id> --files --module Erp.Ventas    # de modulo en modulo
 ```
 
-Devuelve las dependencias por niveles y marca `<- OCULTA A GREP` las que
-ninguna busqueda de texto habria encontrado. Esas son las que se olvidan y las
-que rompen cosas.
+El paso 1 marca `<- OCULTA A GREP` las relaciones que ninguna busqueda de texto
+habria encontrado: esas son las que se olvidan. El paso 2 da rutas de fichero
+deduplicadas, que es lo que de verdad hay que abrir mientras se hace el cambio.
+
+**No te quedes en el paso 1.** El objetivo no es puntuar el riesgo, es revisar
+los sitios afectados durante el cambio. Si el paso 1 dice que hay 200
+dependientes en cuatro modulos, saca la lista de cada modulo y ve revisandolos;
+no des el cambio por bueno sin haberlos mirado.
+
+`--files` no recorta nada a proposito: una lista de trabajo incompleta no sirve.
+Se acota con `--depth` y `--module`, que es como se revisa por tandas.
 
 Al terminar, **enumera al usuario lo que has comprobado y lo que no**. El
 indice cubre lo que el equipo ha registrado, no todo lo que existe: nunca

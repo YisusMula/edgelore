@@ -278,6 +278,9 @@ export function impact(index, id, { maxDepth = 4 } = {}) {
           recorded.add(key);
           entries.push({
             id: edge.from,
+            // La ruta es lo que convierte el alcance en una lista de trabajo:
+            // sin ella hay que resolver cada id por separado para saber que abrir.
+            file: index.nodes.get(edge.from)?.file ?? null,
             via: current === id ? null : current,
             type: edge.type,
             trigger: edge.trigger,
@@ -378,6 +381,74 @@ export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT } = {}
     lines.push('Listado recortado. Para verlo entero: --all (o --json para procesarlo).');
   }
   lines.push('', coverageWarning(index));
+  return lines.join('\n');
+}
+
+/**
+ * Lista de trabajo: los sitios concretos que hay que revisar al hacer el cambio.
+ *
+ * Distinta de `renderImpact`, que sirve para orientarse y esta acotada. Esto es
+ * lo contrario: una peticion explicita del listado completo, deduplicado POR
+ * FICHERO, porque lo que se abre es un fichero y varios nodos suelen vivir en el
+ * mismo. Se acota con --module y --depth, no recortando la lista: una lista de
+ * trabajo a la que le faltan sitios no sirve para nada.
+ */
+export function workList(result, { module: modulo = null, maxDepth = Infinity } = {}) {
+  const porFichero = new Map();
+  let sinFichero = 0;
+
+  for (const level of result.levels) {
+    if (level.depth > maxDepth) continue;
+    for (const entry of level.entries) {
+      if (modulo && !entry.id.startsWith(modulo)) continue;
+      if (!entry.file) {
+        sinFichero += 1;
+        continue;
+      }
+      if (!porFichero.has(entry.file)) porFichero.set(entry.file, []);
+      porFichero.get(entry.file).push({ ...entry, depth: level.depth });
+    }
+  }
+
+  const files = [...porFichero.entries()]
+    .map(([file, items]) => ({
+      file,
+      items,
+      depth: Math.min(...items.map((item) => item.depth)),
+      hidden: items.some((item) => item.hidden),
+    }))
+    // Primero lo mas cercano al cambio, y dentro de eso lo que grep no encuentra.
+    .sort((a, b) => a.depth - b.depth || Number(b.hidden) - Number(a.hidden) || a.file.localeCompare(b.file));
+
+  return { files, sinFichero, total: files.reduce((n, entry) => n + entry.items.length, 0) };
+}
+
+export function renderWorkList(result, lista, { module: modulo = null } = {}) {
+  if (!lista.files.length) {
+    const extra = lista.sinFichero ? ` (${lista.sinFichero} dependiente(s) sin fichero declarado)` : '';
+    return `Sin ficheros que revisar para ${result.id}${modulo ? ` en ${modulo}` : ''}.${extra}`;
+  }
+
+  const lines = [
+    `SITIOS A REVISAR al cambiar ${result.id}${modulo ? `  [solo ${modulo}]` : ''}`,
+    `  ${lista.files.length} fichero(s), ${lista.total} dependiente(s)`,
+    '',
+  ];
+
+  for (const entry of lista.files) {
+    const tipos = [...new Set(entry.items.map((item) => item.type))].join(', ');
+    const marca = entry.hidden ? '  <- OCULTA A GREP' : '';
+    lines.push(`${entry.file}`);
+    lines.push(`  d${entry.depth}  ${tipos}${marca}  ${entry.items.map((item) => item.id).join(', ')}`);
+    // El sitio exacto del literal, cuando se registro: evita releer el fichero entero.
+    for (const item of entry.items) {
+      if (item.at) lines.push(`      literal en ${item.at}`);
+    }
+  }
+
+  if (lista.sinFichero) {
+    lines.push('', `${lista.sinFichero} dependiente(s) sin fichero declarado en el indice (tabla, config, disparador externo).`);
+  }
   return lines.join('\n');
 }
 

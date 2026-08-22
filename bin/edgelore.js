@@ -19,7 +19,7 @@ import { EDGE_TYPES, CONFIDENCE } from '../src/model.js';
 const VERSION = '0.1.0';
 
 /** Banderas que aceptan valor; el resto son booleanas. Repetibles marcadas aparte. */
-const VALUE_FLAGS = new Set(['file', 'kind', 'summary', 'lang', 'note', 'trigger', 'at', 'confidence', 'dir', 'limit', 'depth']);
+const VALUE_FLAGS = new Set(['file', 'kind', 'summary', 'lang', 'note', 'trigger', 'at', 'confidence', 'dir', 'limit', 'depth', 'module']);
 const LIST_FLAGS = new Set(['edge', 'tag', 'rules']);
 
 export function parseArgs(argv) {
@@ -65,7 +65,7 @@ const COMMANDS = {
   add: { run: cmdAdd, help: 'Registra o actualiza un hecho.' },
   link: { run: cmdLink, help: 'Anade una arista entre dos nodos.' },
   query: { run: cmdQuery, help: 'Muestra un nodo con sus aristas salientes y entrantes.' },
-  impact: { run: cmdImpact, help: 'Que se rompe si cambias esto. Transitivo. Usalo ANTES de editar.' },
+  impact: { run: cmdImpact, help: 'Que depende de esto. --files da la lista de sitios que revisar.' },
   find: { run: cmdFind, help: 'Busca hechos por texto.' },
   path: { run: cmdPath, help: 'Camino mas corto conocido entre dos nodos.' },
   verify: { run: cmdVerify, help: 'Sella un hecho como comprobado en el commit actual.' },
@@ -106,6 +106,8 @@ OPCIONES COMUNES
   --confidence X  certain, likely o unverified.
   --all           En query/impact, lista todas las dependencias sin recortar.
   --limit N       Cuantas listar por nivel antes de resumir (por defecto 12).
+  --files         En impact, la lista de trabajo: ficheros concretos a revisar.
+  --module P      Limita a los ids que empiecen por ese prefijo de modulo.
 
 CONFIANZA POR DEFECTO
   edgelore link         certain      es una afirmacion deliberada sobre una relacion
@@ -117,7 +119,9 @@ EJEMPLOS
   edgelore add Erp.Ventas.PagoService --file src/Ventas/PagoService.cs --kind service
   edgelore link AppShell Erp.Ui.DetallePage string-ref --at AppShell.xaml.cs:42 \\
     --note 'registrada como ruta "detalle"'
-  edgelore impact Erp.Ui.DetallePage.OnAppearing   # antes de tocarlo
+  edgelore impact Erp.Ui.DetallePage.OnAppearing            # orientarse: cuanto alcanza
+  edgelore impact Base.PageBase.OnAppearing --files --depth 1   # que ficheros revisar
+  edgelore impact Base.PageBase.OnAppearing --files --module Erp.Ventas
   edgelore query Erp.Ui.DetallePage
   edgelore path AppShell Erp.Data.FacturaRepository
 
@@ -172,11 +176,22 @@ function isMainModule() {
   }
 }
 
+/**
+ * Se fija exitCode en vez de llamar a process.exit().
+ *
+ * Cuando stdout es una tuberia -que es como lo consumen el hook y cualquier
+ * agente- la escritura es asincrona, y process.exit() mata el proceso antes de
+ * vaciar el bufer: la salida se cortaba a los 65.536 bytes, a mitad de linea y
+ * sin ningun aviso. Dejando terminar el proceso por su cuenta, Node vacia
+ * stdout antes de salir.
+ */
 if (isMainModule()) {
   main()
-    .then((code) => process.exit(code))
+    .then((code) => {
+      process.exitCode = code;
+    })
     .catch((error) => {
       process.stderr.write(`${error.message}\n`);
-      process.exit(2);
+      process.exitCode = 2;
     });
 }

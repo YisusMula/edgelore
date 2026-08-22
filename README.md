@@ -118,9 +118,12 @@ derivados que haya que ignorar.
 ## Uso diario
 
 ```bash
-# ANTES de modificar algo: qué se rompe (transitivo)
+# ANTES de modificar algo: orientarse (barato)
 edgelore impact Erp.Ui.DetallePage.OnAppearing
-edgelore impact Facturas --depth 6
+
+# ...y sacar la lista de sitios que revisar durante el cambio
+edgelore impact Base.PageBase.OnAppearing --files --depth 1
+edgelore impact Base.PageBase.OnAppearing --files --module Erp.Ventas
 
 # consultar (antes de explorar el código)
 edgelore query Erp.Ventas.PagoService     # nodo, aristas salientes y entrantes
@@ -199,7 +202,7 @@ Dicho ahora y no dentro de tres meses:
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 95 pruebas).
+v0.1. El núcleo curado está completo y probado (`npm test`, 100 pruebas).
 
 Siguiente paso previsto: un extractor opcional basado en Roslyn que emita hechos
 en este mismo formato con `source: extractor:roslyn`, para poblar las aristas

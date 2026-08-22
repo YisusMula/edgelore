@@ -8,7 +8,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -76,4 +76,39 @@ test('fuera de un repositorio con indice, el error es explicito', () => {
   const vacio = fs.mkdtempSync(path.join(os.tmpdir(), 'edgelore-vacio-'));
   const salida = run(BIN, ['query', 'X'], { cwd: vacio, expectFailure: true });
   assert.match(salida, /No se ha encontrado ningun indice/);
+});
+
+test('una salida grande no se corta al pasar por una tuberia', () => {
+  // Regresion: process.exit() mataba el proceso antes de vaciar stdout, y por
+  // tuberia -que es como lo consumen el hook y cualquier agente- la salida se
+  // cortaba a los 65.536 bytes, a mitad de linea y sin aviso.
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'edgelore-grande-'));
+  fs.mkdirSync(path.join(repo, 'src'));
+  run(BIN, ['init', '--rules', 'dotnet-core'], { cwd: repo });
+
+  const nodos = path.join(repo, '.edgelore', 'nodes');
+  const TOTAL = 1200;   // suficiente para superar holgadamente los 65.536 bytes
+  for (let i = 0; i < TOTAL; i += 1) {
+    fs.writeFileSync(
+      path.join(nodos, `Erp.Mod.Nodo${i}.md`),
+      `---\nid: Erp.Mod.Nodo${i}\nfile: src/ficheroDeNombreLargoParaAbultar${i}.cs\nedges:\n`
+        + '  - to: Objetivo\n    type: calls\n    confidence: certain\n    source: human\n---\n',
+    );
+  }
+  fs.writeFileSync(path.join(nodos, 'Objetivo.md'), '---\nid: Objetivo\nedges: []\n---\n');
+
+  // Hace falta una tuberia REAL con un consumidor que no drena al vuelo: con
+  // execFileSync el padre lee segun el hijo escribe y el bufer nunca se llena,
+  // de modo que el fallo no se reproduce. Una tuberia de shell si lo hace.
+  const salida = execSync(`"${process.execPath}" "${BIN}" impact Objetivo --files | cat`, {
+    cwd: repo,
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  assert.ok(salida.length > 65536, `el corpus debe superar los 64 KB para probar el corte (${salida.length})`);
+
+  // Completitud medida, no estimada: deben aparecer los 1.200 ficheros.
+  const vistos = (salida.match(/ficheroDeNombreLargoParaAbultar\d+\.cs/g) ?? []).length;
+  assert.equal(vistos, TOTAL, `solo llegaron ${vistos} de ${TOTAL} ficheros: la tuberia corta la salida`);
+  assert.match(salida, new RegExp(`${TOTAL} fichero\\(s\\)`));
 });

@@ -25,6 +25,8 @@ import {
   renderStats,
   impact,
   renderImpact,
+  workList,
+  renderWorkList,
 } from '../query.js';
 import { loadRules, kindCatalog, renderKinds, checklistFor, renderChecklist } from '../rules.js';
 import { changedSince, isGitRepo, lastCommitFor } from '../git.js';
@@ -59,7 +61,7 @@ export function cmdQuery(args, options) {
  */
 export function cmdImpact(args, options) {
   const id = args[0];
-  if (!id) throw new Error('Uso: edgelore impact <id> [--depth N]');
+  if (!id) throw new Error('Uso: edgelore impact <id> [--depth N] [--files] [--module <prefijo>]');
   const index = loadIndex(requireStoreRoot());
   const depth = Number.isFinite(options.depth) && options.depth > 0 ? options.depth : 4;
   const result = impact(index, id, { maxDepth: depth });
@@ -74,6 +76,12 @@ export function cmdImpact(args, options) {
     }
     lines.push('', 'Sin datos no se puede acotar el alcance: usa grep y registra lo que descubras.');
     return { output: lines.join('\n'), code: 1 };
+  }
+  // --files cambia la pregunta: de "cuanto alcance tiene" a "que abro para
+  // revisarlo". Por eso no se recorta; se acota con --module y --depth.
+  if (options.files) {
+    const lista = workList(result, { module: options.module });
+    return { output: renderWorkList(result, lista, { module: options.module }) };
   }
   return { output: renderImpact(result, index, { limit: options.all ? 0 : options.limit }) };
 }

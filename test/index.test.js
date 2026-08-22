@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { loadIndex, writeNode, readNode, findStoreRoot, incomingEdges, danglingIds } from '../src/store.js';
-import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact, moduleOf } from '../src/query.js';
+import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact, moduleOf, workList, renderWorkList } from '../src/query.js';
 import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
@@ -689,4 +689,54 @@ test('query reparte por modulo cuando un nodo tiene muchos vecinos', () => {
   assert.match(texto, /reparto por modulo \(80\)/);
   assert.match(texto, /Erp\.A/);
   assert.match(texto, /Erp\.B/);
+});
+
+test('impact expone la ruta de cada dependiente, no solo su id', () => {
+  // Sin la ruta, el alcance no es una lista de trabajo: hay que resolver cada
+  // id por separado para saber que fichero abrir.
+  const root = sandbox();
+  writeNode(root, { id: 'Erp.A.Pagina', file: 'src/A/Pagina.cs', edges: [{ to: 'Base', type: 'implements' }] });
+  writeNode(root, { id: 'Base', edges: [] });
+  const entrada = impact(loadIndex(root), 'Base').levels[0].entries[0];
+  assert.equal(entrada.file, 'src/A/Pagina.cs');
+});
+
+test('la lista de trabajo deduplica por fichero', () => {
+  const root = sandbox();
+  // Dos nodos que viven en el mismo fichero: un solo sitio que abrir.
+  writeNode(root, { id: 'Erp.A.Pagina', file: 'src/A/Pagina.cs', edges: [{ to: 'Base', type: 'implements' }] });
+  writeNode(root, {
+    id: 'Erp.A.Pagina.OnAppearing',
+    file: 'src/A/Pagina.cs',
+    edges: [{ to: 'Base', type: 'lifecycle', trigger: 'al hacerse visible' }],
+  });
+  writeNode(root, { id: 'Base', edges: [] });
+
+  const lista = workList(impact(loadIndex(root), 'Base'));
+  assert.equal(lista.files.length, 1, 'un fichero, aunque lo toquen dos nodos');
+  assert.equal(lista.total, 2);
+  assert.equal(lista.files[0].file, 'src/A/Pagina.cs');
+});
+
+test('la lista de trabajo se acota por modulo y por profundidad', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'Erp.Ventas.S', file: 'src/V/S.cs', edges: [{ to: 'Base', type: 'calls' }] });
+  writeNode(root, { id: 'Erp.Compras.S', file: 'src/C/S.cs', edges: [{ to: 'Base', type: 'calls' }] });
+  writeNode(root, { id: 'Erp.Ventas.Lejano', file: 'src/V/L.cs', edges: [{ to: 'Erp.Ventas.S', type: 'calls' }] });
+  writeNode(root, { id: 'Base', edges: [] });
+  const resultado = impact(loadIndex(root), 'Base');
+
+  assert.equal(workList(resultado, { module: 'Erp.Ventas' }).files.length, 2);
+  assert.equal(workList(resultado, { maxDepth: 1 }).files.length, 2);
+  assert.equal(workList(resultado, { module: 'Erp.Ventas', maxDepth: 1 }).files.length, 1);
+});
+
+test('la lista de trabajo cuenta aparte los dependientes sin fichero', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'Tabla', edges: [{ to: 'Base', type: 'reads' }] });
+  writeNode(root, { id: 'Base', edges: [] });
+  const lista = workList(impact(loadIndex(root), 'Base'));
+  assert.equal(lista.files.length, 0);
+  assert.equal(lista.sinFichero, 1);
+  assert.match(renderWorkList({ id: 'Base' }, lista), /sin fichero declarado/);
 });
