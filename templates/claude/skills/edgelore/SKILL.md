@@ -112,6 +112,15 @@ edgelore link Erp.Ventas.PagoService Facturas writes --confidence certain
 edgelore verify Erp.Ui.DetallePage      # tras confirmar que sigue siendo cierto
 ```
 
+**Si renombras una clase o un metodo que esta en el indice, usa `edgelore
+rename`** en lugar de dejar el id viejo: reapunta de golpe todo lo que la
+referenciaba y arrastra sus miembros. Un indice lleno de ids que ya no existen
+deja de servir muy rapido.
+
+```
+edgelore rename Erp.Ui.ViejaPage Erp.Ui.NuevaPage
+```
+
 `edgelore kinds` lista los tipos de nodo que conocen las reglas activas.
 `edgelore checklist <kind>` te dice que comprobar para ese tipo: usalo cuando
 registres un nodo nuevo, porque son justo las preguntas cuya respuesta se pierde.

@@ -112,3 +112,39 @@ test('una salida grande no se corta al pasar por una tuberia', () => {
   assert.equal(vistos, TOTAL, `solo llegaron ${vistos} de ${TOTAL} ficheros: la tuberia corta la salida`);
   assert.match(salida, new RegExp(`${TOTAL} fichero\\(s\\)`));
 });
+
+test('stale detecta los mismos hechos agrupando las llamadas a git', () => {
+  // Regresion de rendimiento: se preguntaba a git una vez por hecho, y con
+  // 3.000 hechos verificados eran 13 segundos en un comando pensado para CI.
+  // Agrupar por commit no puede cambiar QUE se detecta, solo cuanto tarda.
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'edgelore-stale-'));
+  const git = (...args) => execFileSync('git', args, { cwd: repo, stdio: 'ignore' });
+  fs.mkdirSync(path.join(repo, 'src'));
+  git('init', '-q');
+  git('config', 'user.email', 't@e.com');
+  git('config', 'user.name', 'T');
+
+  // Incluye una ruta con espacio y tilde: git las entrecomilla al listarlas por
+  // lineas, y por eso filesChangedSince usa -z.
+  const ficheros = ['A.cs', 'B.cs', 'con acento ñ.cs'];
+  for (const f of ficheros) fs.writeFileSync(path.join(repo, 'src', f), 'class X {}\n');
+  git('add', '-A');
+  git('commit', '-qm', 'base');
+
+  run(BIN, ['init', '--rules', 'dotnet-core'], { cwd: repo });
+  ficheros.forEach((f, i) => run(BIN, ['add', `Nodo${i}`, '--file', `src/${f}`], { cwd: repo }));
+  git('add', '-A');
+  git('commit', '-qm', 'hechos');
+
+  assert.match(run(BIN, ['stale'], { cwd: repo }), /siguen al dia/);
+
+  fs.appendFileSync(path.join(repo, 'src', 'A.cs'), '// cambio\n');
+  fs.appendFileSync(path.join(repo, 'src', 'con acento ñ.cs'), '// cambio\n');
+  git('add', '-A');
+  git('commit', '-qm', 'cambios');
+
+  const salida = run(BIN, ['stale'], { cwd: repo, expectFailure: true });
+  assert.match(salida, /Nodo0/, 'A.cs cambio y debe marcarse');
+  assert.match(salida, /Nodo2/, 'la ruta con espacio y tilde tambien debe detectarse');
+  assert.ok(!/Nodo1\b/.test(salida.split('sin verificar')[0]), 'B.cs no cambio y no debe marcarse');
+});

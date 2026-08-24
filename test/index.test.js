@@ -9,7 +9,7 @@ import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, is
 import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
-import { parseEdgeFlag, cmdAdd } from '../src/commands/write.js';
+import { parseEdgeFlag, cmdAdd, cmdLink, cmdRename } from '../src/commands/write.js';
 import { cmdInit, cmdUninstall, cmdRules, detectRuleSets } from '../src/commands/init.js';
 import { parseArgs } from '../bin/edgelore.js';
 
@@ -739,4 +739,67 @@ test('la lista de trabajo cuenta aparte los dependientes sin fichero', () => {
   assert.equal(lista.files.length, 0);
   assert.equal(lista.sinFichero, 1);
   assert.match(renderWorkList({ id: 'Base' }, lista), /sin fichero declarado/);
+});
+
+test('rename arrastra los miembros del tipo', () => {
+  // Renombrar una clase sin arrastrar `Clase.OnAppearing` dejaria huerfano al
+  // hijo, y eso es siempre un error, no una eleccion del usuario.
+  inSandbox((root) => {
+    writeNode(root, { id: 'Erp.Ui.Vieja', file: 'a.cs', edges: [] });
+    writeNode(root, { id: 'Erp.Ui.Vieja.OnAppearing', edges: [] });
+    cmdRename(['Erp.Ui.Vieja', 'Erp.Ui.Nueva'], {});
+
+    assert.ok(readNode(root, 'Erp.Ui.Nueva'), 'la clase se renombra');
+    assert.ok(readNode(root, 'Erp.Ui.Nueva.OnAppearing'), 'el miembro sigue al tipo');
+    assert.equal(readNode(root, 'Erp.Ui.Vieja'), null, 'no queda el id viejo');
+  });
+});
+
+test('rename reapunta todo lo que referenciaba al id viejo', () => {
+  inSandbox((root) => {
+    writeNode(root, { id: 'Vieja', edges: [] });
+    writeNode(root, { id: 'Otro', edges: [{ to: 'Vieja', type: 'calls' }] });
+    writeNode(root, { id: 'Tercero', edges: [{ to: 'Vieja.Miembro', type: 'calls' }] });
+    cmdRename(['Vieja', 'Nueva'], {});
+
+    assert.equal(readNode(root, 'Otro').edges[0].to, 'Nueva');
+    assert.equal(readNode(root, 'Tercero').edges[0].to, 'Nueva.Miembro');
+    assert.deepEqual(danglingIds(loadIndex(root)).filter((id) => id.startsWith('Vieja')), []);
+  });
+});
+
+test('rename funciona sobre un id que solo existe como destino de aristas', () => {
+  inSandbox((root) => {
+    writeNode(root, { id: 'Origen', edges: [{ to: 'SoloReferenciado', type: 'calls' }] });
+    const salida = cmdRename(['SoloReferenciado', 'ConNombreBueno'], {}).output;
+    assert.equal(readNode(root, 'Origen').edges[0].to, 'ConNombreBueno');
+    assert.match(salida, /no tenia ficha propia/);
+  });
+});
+
+test('rename se niega si el destino ya existe', () => {
+  inSandbox((root) => {
+    writeNode(root, { id: 'A', edges: [] });
+    writeNode(root, { id: 'B', edges: [] });
+    const resultado = cmdRename(['A', 'B'], {});
+    assert.equal(resultado.code, 1);
+    assert.match(resultado.output, /Ya existen hechos/);
+    assert.ok(readNode(root, 'A'), 'no debe tocar nada al negarse');
+  });
+});
+
+test('rename avisa cuando el id no aparece en ningun sitio', () => {
+  inSandbox(() => {
+    const resultado = cmdRename(['NoExiste', 'Nuevo'], {});
+    assert.equal(resultado.code, 1);
+    assert.match(resultado.output, /no aparece en el indice/);
+  });
+});
+
+test('rename conserva las notas del hecho', () => {
+  inSandbox((root) => {
+    writeNode(root, { id: 'Vieja', edges: [] }, 'El porque, que es lo caro de recuperar.');
+    cmdRename(['Vieja', 'Nueva'], {});
+    assert.match(readNode(root, 'Nueva').notes, /lo caro de recuperar/);
+  });
 });

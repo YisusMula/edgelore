@@ -29,7 +29,7 @@ import {
   renderWorkList,
 } from '../query.js';
 import { loadRules, kindCatalog, renderKinds, checklistFor, renderChecklist } from '../rules.js';
-import { changedSince, isGitRepo, lastCommitFor } from '../git.js';
+import { changedSince, filesChangedSince, isGitRepo, lastCommitFor } from '../git.js';
 
 export function cmdQuery(args, options) {
   const id = args[0];
@@ -176,16 +176,31 @@ export function cmdStale(args, options) {
   const stale = [];
   const unverified = [];
 
+  // Se agrupan los hechos por el commit en que se verificaron y se pregunta a
+  // git una vez por commit, no una por hecho: con miles de hechos la diferencia
+  // es de segundos a milisegundos, y esto corre en CI.
+  const porCommit = new Map();
   for (const node of index.nodes.values()) {
     if (!node.file) continue;
     if (!node.verified?.commit) {
       unverified.push(node);
       continue;
     }
-    if (changedSince(root, node.verified.commit, node.file)) {
-      stale.push({ id: node.id, file: node.file, since: node.verified.commit, last: lastCommitFor(root, node.file) });
+    if (!porCommit.has(node.verified.commit)) porCommit.set(node.verified.commit, []);
+    porCommit.get(node.verified.commit).push(node);
+  }
+
+  for (const [commit, nodes] of porCommit) {
+    const cambiados = filesChangedSince(root, commit);
+    // null = git no pudo responder (commit desconocido tras un rebase, por
+    // ejemplo). Ante la duda no se marca nada, como hacia changedSince.
+    if (!cambiados) continue;
+    for (const node of nodes) {
+      if (!cambiados.has(node.file)) continue;
+      stale.push({ id: node.id, file: node.file, since: commit, last: lastCommitFor(root, node.file) });
     }
   }
+  stale.sort((a, b) => a.id.localeCompare(b.id));
 
   if (options.json) return { output: JSON.stringify({ stale, unverified: unverified.map((n) => n.id) }, null, 2) };
 

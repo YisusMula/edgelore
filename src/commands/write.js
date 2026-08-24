@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadIndex, readNode, requireStoreRoot, writeNode, nodePath } from '../store.js';
-import { normalizeEdge, validateNode, EDGE_TYPES, CONFIDENCE } from '../model.js';
+import { normalizeEdge, validateNode, isValidId, EDGE_TYPES, CONFIDENCE } from '../model.js';
 import { loadRules, kindCatalog, implicitEdgesFor, checklistFor, renderChecklist } from '../rules.js';
 import { headCommit, currentUser, isGitRepo } from '../git.js';
 
@@ -197,4 +197,88 @@ export function cmdRemove(args, options) {
   }
   fs.unlinkSync(file);
   return { output: `Eliminado: ${id}` };
+}
+
+/**
+ * `rename`: cambia el id de un nodo y arregla todo lo que apuntaba a el.
+ *
+ * Sin esto, renombrar una clase obliga a editar a mano cada hecho que la
+ * referencia. En un producto vivo se renombra constantemente, asi que la
+ * alternativa real no es "hacerlo a mano": es que el indice se pudra en cada
+ * refactor, que es como muere una herramienta de este tipo.
+ *
+ * Los miembros van con el tipo: renombrar `Erp.Ui.DetallePage` sin arrastrar
+ * `Erp.Ui.DetallePage.OnAppearing` dejaria huerfano al hijo, y eso es siempre
+ * un error, no una eleccion.
+ */
+export function cmdRename(args, options) {
+  const [from, to] = args;
+  if (!from || !to) throw new Error('Uso: edgelore rename <id-actual> <id-nuevo>');
+  if (from === to) return { output: 'El id de origen y el de destino son el mismo.', code: 2 };
+  if (!isValidId(to)) throw new Error(`El id nuevo no es valido: "${to}"`);
+
+  const root = requireStoreRoot();
+  const index = loadIndex(root);
+
+  // Los hijos siguen al padre; el propio nodo puede no tener ficha y existir
+  // solo como destino de aristas, y renombrarlo sigue siendo correcto.
+  const mapa = new Map([[from, to]]);
+  const candidatos = new Set([...index.nodes.keys(), ...index.incoming.keys()]);
+  for (const id of candidatos) {
+    if (id.startsWith(`${from}.`)) mapa.set(id, to + id.slice(from.length));
+  }
+
+  if (!candidatos.has(from) && mapa.size === 1) {
+    return { output: `"${from}" no aparece en el indice, ni con ficha propia ni referenciado.`, code: 1 };
+  }
+
+  const chocan = [...mapa.values()].filter((nuevo) => index.nodes.has(nuevo));
+  if (chocan.length && !options.force) {
+    return {
+      output: `Ya existen hechos con esos ids: ${chocan.join(', ')}.\n`
+        + 'Fusionar dos nodos es otra operacion: revisa a mano o usa --force para sobreescribir.',
+      code: 1,
+    };
+  }
+
+  const renombrados = [];
+  const aristasActualizadas = [];
+
+  for (const node of [...index.nodes.values()]) {
+    const nuevoId = mapa.get(node.id) ?? node.id;
+    const aristas = (node.edges ?? []).map((edge) => {
+      const destino = mapa.get(edge.to);
+      if (!destino) return edge;
+      aristasActualizadas.push(`${nuevoId} -> ${destino}`);
+      return { ...edge, to: destino };
+    });
+
+    const cambiaId = nuevoId !== node.id;
+    const cambianAristas = aristas.some((edge, i) => edge.to !== node.edges[i].to);
+    if (!cambiaId && !cambianAristas) continue;
+
+    const notas = node.notes ?? '';
+    const actualizado = { ...node, id: nuevoId, edges: aristas };
+    delete actualizado.notes;
+    delete actualizado._file;
+
+    writeNode(root, actualizado, notas);
+    if (cambiaId) {
+      fs.rmSync(nodePath(root, node.id), { force: true });
+      renombrados.push(`${node.id} -> ${nuevoId}`);
+    }
+  }
+
+  const lines = [];
+  if (renombrados.length) {
+    lines.push(`Renombrados ${renombrados.length} hecho(s):`);
+    renombrados.forEach((entry) => lines.push(`  ${entry}`));
+  } else {
+    lines.push(`"${from}" no tenia ficha propia; solo se han actualizado las referencias.`);
+  }
+  if (aristasActualizadas.length) {
+    lines.push('', `${aristasActualizadas.length} arista(s) reapuntadas al id nuevo.`);
+  }
+  lines.push('', 'Comprueba que el fichero declarado sigue siendo correcto: edgelore validate');
+  return { output: lines.join('\n') };
 }

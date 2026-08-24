@@ -43,3 +43,21 @@ export function changedSince(root, commit, file) {
   if (out === null) return false;
   return out.length > 0;
 }
+
+/**
+ * Todos los ficheros tocados desde `commit`, en UNA sola invocacion de git.
+ *
+ * Preguntar fichero a fichero cuesta un proceso por hecho: con 3.000 hechos
+ * verificados eran 13 segundos, y `stale` esta pensado para correr en CI en cada
+ * pull request. Como los hechos suelen compartir el commit en que se
+ * verificaron, agrupar por commit reduce miles de invocaciones a unas pocas.
+ *
+ * Se usa -z porque git entrecomilla y escapa las rutas no ASCII cuando escribe
+ * en lineas, y este proyecto tiene que funcionar con rutas en castellano.
+ */
+export function filesChangedSince(root, commit) {
+  if (!commit) return null;
+  const out = git(root, ['log', '-z', '--name-only', '--format=', `${commit}..HEAD`]);
+  if (out === null) return null;
+  return new Set(out.split('\0').map((line) => line.trim()).filter(Boolean));
+}

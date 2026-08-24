@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cmdQuery, cmdImpact, cmdFind, cmdPath, cmdStats, cmdKinds, cmdChecklist, cmdValidate, cmdStale } from '../src/commands/read.js';
-import { cmdAdd, cmdLink, cmdVerify, cmdRemove } from '../src/commands/write.js';
+import { cmdAdd, cmdLink, cmdVerify, cmdRemove, cmdRename } from '../src/commands/write.js';
 import { cmdInit, cmdUninstall, cmdRules, availableRuleSets } from '../src/commands/init.js';
 import { cmdHook } from '../src/commands/hook.js';
 import { EDGE_TYPES, CONFIDENCE } from '../src/model.js';
@@ -69,6 +69,7 @@ const COMMANDS = {
   find: { run: cmdFind, help: 'Busca hechos por texto.' },
   path: { run: cmdPath, help: 'Camino mas corto conocido entre dos nodos.' },
   verify: { run: cmdVerify, help: 'Sella un hecho como comprobado en el commit actual.' },
+  rename: { run: cmdRename, help: 'Cambia el id de un nodo y reapunta todo lo que le referenciaba.' },
   remove: { run: cmdRemove, help: 'Elimina un hecho.' },
   validate: { run: cmdValidate, help: 'Comprueba la coherencia del indice. Pensado para CI.' },
   stale: { run: cmdStale, help: 'Lista los hechos cuyo codigo cambio despues de verificarlos.' },

@@ -138,6 +138,7 @@ edgelore link AppShell Erp.Ui.DetallePage string-ref \
 # mantener
 edgelore stale                            # hechos cuyo código cambió tras verificarlos
 edgelore verify Erp.Ui.DetallePage        # confirmarlo en el commit actual
+edgelore rename Erp.Ui.Vieja Erp.Ui.Nueva # al refactorizar: reapunta todo lo que la citaba
 edgelore validate --strict                # coherencia del índice; para CI
 edgelore stats                            # cobertura
 ```
@@ -202,7 +203,7 @@ Dicho ahora y no dentro de tres meses:
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 100 pruebas).
+v0.1. El núcleo curado está completo y probado (`npm test`, 107 pruebas).
 
 Siguiente paso previsto: un extractor opcional basado en Roslyn que emita hechos
 en este mismo formato con `source: extractor:roslyn`, para poblar las aristas
