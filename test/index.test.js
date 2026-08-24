@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { loadIndex, writeNode, readNode, findStoreRoot, incomingEdges, danglingIds } from '../src/store.js';
-import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact, moduleOf, workList, renderWorkList } from '../src/query.js';
+import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact, moduleOf, workList, renderWorkList, didYouMean, suggest } from '../src/query.js';
 import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
@@ -802,4 +802,67 @@ test('rename conserva las notas del hecho', () => {
     cmdRename(['Vieja', 'Nueva'], {});
     assert.match(readNode(root, 'Nueva').notes, /lo caro de recuperar/);
   });
+});
+
+test('link no carga el indice entero para avisar del destino', () => {
+  // Antes leia los miles de ficheros del almacen solo para imprimir un aviso de
+  // una linea, en uno de los comandos que mas se repiten al dia.
+  inSandbox((root) => {
+    for (let i = 0; i < 40; i += 1) writeNode(root, { id: `Relleno${i}`, edges: [] });
+    writeNode(root, { id: 'Origen', edges: [] });
+
+    const sinFicha = cmdLink(['Origen', 'Destino', 'calls'], {}).output;
+    assert.match(sinFicha, /aun no tiene ficha propia/);
+
+    writeNode(root, { id: 'Destino', edges: [] });
+    const conFicha = cmdLink(['Origen', 'Destino', 'calls'], {}).output;
+    assert.ok(!conFicha.includes('aun no tiene ficha'), 'sin aviso cuando el destino existe');
+  });
+});
+
+test('path distingue "no existe" de "no hay camino"', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'A', edges: [] });
+  writeNode(root, { id: 'Z', edges: [] });
+  const index = loadIndex(root);
+
+  // Existen los dos pero no conectan: eso si es "no hay camino".
+  assert.equal(findPath(index, 'A', 'Z'), null);
+  // Y un extremo inexistente debe detectarse antes de recorrer nada.
+  assert.equal(index.nodes.has('Fantasma') || index.incoming.has('Fantasma'), false);
+});
+
+test('la sugerencia funciona ante una errata, no solo por subcadena', () => {
+  // `search` solo casa subcadenas, asi que ante "Pagna7" por "Pagina7" no
+  // devolvia nada: el "quiza te refieres a" fallaba justo en su caso principal.
+  const root = sandbox();
+  writeNode(root, { id: 'Erp.Ventas.Pagina7', edges: [] });
+  const index = loadIndex(root);
+  assert.deepEqual(search(index, 'Erp.Ventas.Pagna7'), [], 'por subcadena no hay nada');
+  assert.deepEqual(didYouMean(index, 'Erp.Ventas.Pagna7'), ['Erp.Ventas.Pagina7']);
+});
+
+test('a igual parecido en el nombre corto gana el del modulo correcto', () => {
+  // Regresion: los cuatro modulos empataban en "Pagina7" y el orden alfabetico
+  // ponia el modulo equivocado primero.
+  const root = sandbox();
+  for (const modulo of ['Erp.Almacen', 'Erp.Compras', 'Erp.Contabilidad', 'Erp.Ventas']) {
+    writeNode(root, { id: `${modulo}.Pagina7`, edges: [] });
+  }
+  const sugerencias = didYouMean(loadIndex(root), 'Erp.Ventas.Pagna7', { limit: 4 });
+  assert.equal(sugerencias[0], 'Erp.Ventas.Pagina7', 'el del modulo pedido va primero');
+});
+
+test('la sugerencia no cuela candidatos sin parecido real', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'Base.Ui.PageBase', edges: [] });
+  writeNode(root, { id: 'Erp.Almacen.Pagina0', edges: [] });
+  const sugerencias = didYouMean(loadIndex(root), 'Basse.Ui.PageBase', { limit: 5 });
+  assert.deepEqual(sugerencias, ['Base.Ui.PageBase']);
+});
+
+test('la sugerencia por subcadena sigue teniendo prioridad', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'Erp.Ventas.PagoService', edges: [] });
+  assert.deepEqual(didYouMean(loadIndex(root), 'PagoService'), ['Erp.Ventas.PagoService']);
 });

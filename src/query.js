@@ -190,6 +190,64 @@ export function search(index, term, { limit = 20 } = {}) {
   return hits.sort((a, b) => a.score - b.score || a.id.localeCompare(b.id)).slice(0, limit);
 }
 
+/** Distancia de edicion acotada: si supera `max`, corta y devuelve Infinity. */
+function editDistance(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return Infinity;
+  let previa = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const fila = [i];
+    let minimo = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const coste = a[i - 1] === b[j - 1] ? 0 : 1;
+      fila[j] = Math.min(previa[j] + 1, fila[j - 1] + 1, previa[j - 1] + coste);
+      if (fila[j] < minimo) minimo = fila[j];
+    }
+    if (minimo > max) return Infinity;
+    previa = fila;
+  }
+  return previa[b.length];
+}
+
+/**
+ * Ids parecidos al que se pidio, para cuando no existe.
+ *
+ * `search` solo casa subcadenas, asi que ante una errata -"Pagna7" por
+ * "Pagina7"- no devolvia nada: la sugerencia existia pero fallaba justo en el
+ * caso que la justifica. Se compara tambien contra el ultimo segmento, porque
+ * es habitual escribir el nombre corto sin el espacio de nombres.
+ */
+export function suggest(index, id, { limit = 3 } = {}) {
+  const objetivo = id.toLowerCase();
+  const cola = objetivo.split('.').pop();
+  // El nombre corto se compara con tolerancia mas estrecha que el id completo:
+  // con la misma, "PageBase" casaba con "Pagina0" y colaba ruido evidente.
+  const tolTotal = Math.max(2, Math.floor(objetivo.length * 0.34));
+  const tolCola = Math.max(1, Math.floor(cola.length * 0.25));
+  const candidatos = [];
+
+  for (const candidato of new Set([...index.nodes.keys(), ...index.incoming.keys()])) {
+    const bajo = candidato.toLowerCase();
+    const total = editDistance(objetivo, bajo, tolTotal);
+    const parcial = editDistance(cola, bajo.split('.').pop(), tolCola);
+    const distancia = Math.min(total, parcial);
+    if (distancia !== Infinity) candidatos.push({ id: candidato, distancia, total });
+  }
+
+  // A igualdad de parecido en el nombre corto gana quien tambien se parece en
+  // el id completo: si no, "Erp.Ventas.Pagna7" proponia el Pagina7 de los otros
+  // tres modulos antes que el de Ventas, que es justo el que se buscaba.
+  return candidatos
+    .sort((a, b) => a.distancia - b.distancia || a.total - b.total || a.id.localeCompare(b.id))
+    .slice(0, limit)
+    .map((entry) => entry.id);
+}
+
+/** Ids parecidos, por subcadena primero y por parecido si no hay ninguno. */
+export function didYouMean(index, id, { limit = 3 } = {}) {
+  const porTexto = search(index, id, { limit }).map((hit) => hit.id);
+  return porTexto.length ? porTexto : suggest(index, id, { limit });
+}
+
 export function renderSearch(hits, term) {
   if (!hits.length) return `Sin resultados para "${term}".`;
   return hits

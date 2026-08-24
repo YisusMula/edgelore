@@ -157,8 +157,12 @@ ${Object.entries(EDGE_TYPES).map(([key, help]) => `  ${key.padEnd(11)} ${help}`)
   if (problems.length) return { output: problems.join('\n'), code: 1 };
 
   writeNode(root, node, existing?.notes ?? '');
-  const index = loadIndex(root);
-  const warning = index.nodes.has(to) ? '' : `\nAviso: "${to}" aun no tiene ficha propia. Registralo con \`edgelore add ${to}\`.`;
+  // Basta con mirar si existe la ficha del destino: cargar el indice entero
+  // para un aviso de una linea son miles de lecturas de fichero, y `link` es de
+  // los comandos que mas se repiten al dia.
+  const warning = readNode(root, to)
+    ? ''
+    : `\nAviso: "${to}" aun no tiene ficha propia. Registralo con \`edgelore add ${to}\`.`;
   return { output: `${from} --[${type}]--> ${to}${warning}` };
 }
 

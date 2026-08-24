@@ -27,6 +27,7 @@ import {
   renderImpact,
   workList,
   renderWorkList,
+  didYouMean,
 } from '../query.js';
 import { loadRules, kindCatalog, renderKinds, checklistFor, renderChecklist } from '../rules.js';
 import { changedSince, filesChangedSince, isGitRepo, lastCommitFor } from '../git.js';
@@ -39,11 +40,11 @@ export function cmdQuery(args, options) {
   const result = neighbourhood(index, id);
 
   if (!result) {
-    const hits = search(index, id, { limit: 5 });
+    const hits = didYouMean(index, id, { limit: 5 });
     const lines = [`No hay ningun hecho registrado para "${id}".`];
     if (hits.length) {
       lines.push('', 'Quiza te refieres a:');
-      hits.forEach((hit) => lines.push(`  ${hit.id}`));
+      hits.forEach((sugerencia) => lines.push(`  ${sugerencia}`));
     }
     lines.push('', `Registralo con: edgelore add ${id} --file <ruta> --kind <kind>`);
     return { output: lines.join('\n'), code: 1 };
@@ -68,11 +69,11 @@ export function cmdImpact(args, options) {
 
   if (options.json) return { output: JSON.stringify(result, null, 2) };
   if (!result.known && result.affected === 0) {
-    const hits = search(index, id, { limit: 5 });
+    const hits = didYouMean(index, id, { limit: 5 });
     const lines = [`"${id}" no aparece en el indice, ni con ficha propia ni referenciado.`];
     if (hits.length) {
       lines.push('', 'Quiza te refieres a:');
-      hits.forEach((hit) => lines.push(`  ${hit.id}`));
+      hits.forEach((sugerencia) => lines.push(`  ${sugerencia}`));
     }
     lines.push('', 'Sin datos no se puede acotar el alcance: usa grep y registra lo que descubras.');
     return { output: lines.join('\n'), code: 1 };
@@ -99,6 +100,20 @@ export function cmdPath(args, options) {
   const [from, to] = args;
   if (!from || !to) throw new Error('Uso: edgelore path <desde> <hasta>');
   const index = loadIndex(requireStoreRoot());
+
+  // "No hay camino" y "ese nodo no existe" son problemas distintos, y
+  // confundirlos manda a buscar una conexion que nunca fue el problema.
+  const conocido = (id) => index.nodes.has(id) || index.incoming.has(id);
+  const ausentes = [from, to].filter((id) => !conocido(id));
+  if (ausentes.length) {
+    const lines = ausentes.map((id) => `"${id}" no aparece en el indice.`);
+    for (const id of ausentes) {
+      const hits = didYouMean(index, id, { limit: 3 });
+      if (hits.length) lines.push(`  quiza: ${hits.join(', ')}`);
+    }
+    return { output: lines.join('\n'), code: 1 };
+  }
+
   const steps = findPath(index, from, to);
   if (options.json) return { output: JSON.stringify(steps, null, 2), code: steps ? 0 : 1 };
   return { output: renderPath(steps, from, to), code: steps ? 0 : 1 };
