@@ -545,7 +545,7 @@ export function stats(index) {
   return { nodes: index.nodes.size, edges, hidden, byType, bySource, byConfidence };
 }
 
-export function renderStats(summary, { dangling = [] } = {}) {
+export function renderStats(summary, { esperados = [], sospechosos = [] } = {}) {
   const lines = [
     `nodos:   ${summary.nodes}`,
     `aristas: ${summary.edges}`,
@@ -561,10 +561,14 @@ export function renderStats(summary, { dangling = [] } = {}) {
   section('por tipo:', summary.byType);
   section('por confianza:', summary.byConfidence);
   section('por origen:', summary.bySource);
-  if (dangling.length) {
-    lines.push('', `referenciados sin ficha propia (${dangling.length}):`);
-    dangling.slice(0, 20).forEach((id) => lines.push(`  ${id}`));
-    if (dangling.length > 20) lines.push(`  ... y ${dangling.length - 20} mas`);
+  if (esperados.length) {
+    lines.push('', `miembros generados por reglas, sin ficha propia: ${esperados.length} (normal)`);
+  }
+  if (sospechosos.length) {
+    lines.push('', `SIN DECLARAR y sin regla que los genere (${sospechosos.length}):`);
+    sospechosos.slice(0, 15).forEach((id) => lines.push(`  ${id}`));
+    if (sospechosos.length > 15) lines.push(`  ... y ${sospechosos.length - 15} mas`);
+    lines.push('  Suelen ser restos de un renombrado hecho sin `edgelore rename`.');
   }
   return lines.join('\n');
 }

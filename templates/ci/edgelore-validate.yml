@@ -23,6 +23,12 @@ jobs:
           node-version: 20
       # Ajusta la instalacion si aun no publicais el paquete en npm.
       - run: npm install -g edgelore
+      # Rompe el build solo por errores de esquema: un hecho mal escrito es
+      # culpa de quien lo escribio y se arregla al momento.
       - run: edgelore validate
-      # Informativo: no bloquea el merge, pero deja visible lo que hay por revisar.
+      # Informativo. La desincronizacion con el codigo -ficheros borrados o
+      # movidos- es inevitable en un repositorio vivo: romper el build por ella
+      # dejaria el CI en rojo permanente, y un CI que lleva meses en rojo se
+      # ignora. Se deja visible para que alguien lo limpie con `edgelore prune`.
       - run: edgelore stale || true
+      - run: edgelore prune || true

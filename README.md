@@ -139,7 +139,8 @@ edgelore link AppShell Erp.Ui.DetallePage string-ref \
 edgelore stale                            # hechos cuyo código cambió tras verificarlos
 edgelore verify Erp.Ui.DetallePage        # confirmarlo en el commit actual
 edgelore rename Erp.Ui.Vieja Erp.Ui.Nueva # al refactorizar: reapunta todo lo que la citaba
-edgelore validate --strict                # coherencia del índice; para CI
+edgelore validate                         # esquema (rompe CI) + desincronización (avisa)
+edgelore prune                            # hechos cuyo fichero ya no existe; --apply borra
 edgelore stats                            # cobertura
 ```
 
@@ -181,8 +182,10 @@ Los dos hooks cierran el círculo sin depender de que nadie se acuerde:
   toca un único fichero.
 - **Serialización determinista.** Las claves salen siempre en el mismo orden, así
   que los diffs muestran el cambio real y no una reordenación.
-- **`edgelore validate` en CI.** Es la única defensa automática contra que el índice
-  acumule mentiras.
+- **`edgelore validate` en CI, sin romper el build por desgaste normal.** Un hecho
+  mal escrito rompe; que alguien borre un fichero, no. Romper el build por lo
+  segundo deja el CI en rojo permanente, y un CI que lleva meses en rojo se
+  ignora — perdiendo la única defensa automática contra que el índice mienta.
 - **La salida está acotada por diseño.** Ningún comando puede devolver miles de
   líneas: el índice deja de ahorrar en el momento en que una consulta cuesta más
   que la búsqueda que evita. El hook automático es aún más estricto, porque su
@@ -203,7 +206,7 @@ Dicho ahora y no dentro de tres meses:
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 113 pruebas).
+v0.1. El núcleo curado está completo y probado (`npm test`, 119 pruebas).
 
 Siguiente paso previsto: un extractor opcional basado en Roslyn que emita hechos
 en este mismo formato con `source: extractor:roslyn`, para poblar las aristas

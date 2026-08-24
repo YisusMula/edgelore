@@ -176,3 +176,30 @@ export function incomingEdges(index, id) {
 export function danglingIds(index) {
   return [...index.incoming.keys()].filter((id) => !index.nodes.has(id)).sort();
 }
+
+/**
+ * Separa los ids sin ficha en los que son NORMALES y los que son SOSPECHOSOS.
+ *
+ * Las reglas generan aristas hacia miembros -`Pagina.OnAppearing`, `.ctor`-
+ * que casi nunca tendran ficha propia, y eso esta bien. Un resto de renombrado
+ * hecho sin `edgelore rename`, en cambio, es podredumbre.
+ *
+ * Contarlos juntos hacia que la lista tuviera cientos de entradas normales, que
+ * es exactamente como se esconde una entrada que si importa: nadie la mira.
+ */
+export function classifyDangling(index) {
+  const esperados = [];
+  const sospechosos = [];
+
+  for (const id of danglingIds(index)) {
+    const aristas = index.incoming.get(id) ?? [];
+    const soloReglas = aristas.length > 0 && aristas.every((edge) => String(edge.source ?? '').startsWith('rule:'));
+    const corte = id.lastIndexOf('.');
+    const padre = corte > 0 ? id.slice(0, corte) : null;
+    // Miembro generado por una regla cuyo tipo si esta registrado: es lo normal.
+    if (soloReglas && padre && index.nodes.has(padre)) esperados.push(id);
+    else sospechosos.push(id);
+  }
+
+  return { esperados, sospechosos };
+}

@@ -12,6 +12,8 @@ import {
   loadIndex,
   requireStoreRoot,
   danglingIds,
+  classifyDangling,
+  nodePath,
   paths,
 } from '../store.js';
 import {
@@ -122,8 +124,11 @@ export function cmdPath(args, options) {
 export function cmdStats(args, options) {
   const index = loadIndex(requireStoreRoot());
   const summary = stats(index);
-  if (options.json) return { output: JSON.stringify({ ...summary, dangling: danglingIds(index) }, null, 2) };
-  return { output: renderStats(summary, { dangling: danglingIds(index) }) };
+  const { esperados, sospechosos } = classifyDangling(index);
+  if (options.json) {
+    return { output: JSON.stringify({ ...summary, dangling: danglingIds(index), esperados, sospechosos }, null, 2) };
+  }
+  return { output: renderStats(summary, { esperados, sospechosos }) };
 }
 
 export function cmdKinds(args, options) {
@@ -151,31 +156,110 @@ export function cmdChecklist(args, options) {
 export function cmdValidate(args, options) {
   const root = requireStoreRoot();
   const index = loadIndex(root);
-  const problems = [...index.problems];
+
+  // Dos categorias que NO deben mezclarse.
+  //
+  // Un ERROR es un hecho mal escrito: esquema invalido, tipo de arista
+  // inventado, id duplicado. Es culpa de quien lo escribio, se arregla al
+  // momento y debe romper el build.
+  //
+  // Una DESINCRONIZACION es que el codigo se movio por debajo: alguien borro o
+  // renombro un fichero. Es inevitable en cualquier repositorio vivo, y romper
+  // el build por ella deja el CI en rojo permanente. Un CI que lleva meses en
+  // rojo se ignora, y con el se pierde la unica defensa contra que el indice
+  // mienta. Se informa, y solo rompe con --strict.
+  const errores = [...index.problems];
+  const desincronizados = [];
 
   for (const node of index.nodes.values()) {
     if (node.file && !fs.existsSync(path.join(root, node.file))) {
-      problems.push(`${node.id}: el fichero declarado no existe (${node.file})`);
+      desincronizados.push({ id: node.id, file: node.file });
     }
   }
 
-  const dangling = danglingIds(index);
+  const { esperados, sospechosos } = classifyDangling(index);
   const lines = [];
-  if (problems.length) {
-    lines.push(`${problems.length} problema(s):`);
-    problems.forEach((problem) => lines.push(`  ${problem}`));
-  }
-  if (dangling.length && options.strict) {
-    lines.push('', `${dangling.length} id(s) referenciados sin ficha propia (--strict):`);
-    dangling.forEach((id) => lines.push(`  ${id}`));
+
+  if (errores.length) {
+    lines.push(`${errores.length} error(es) de esquema:`);
+    errores.forEach((problem) => lines.push(`  ${problem}`));
   }
 
-  const failed = problems.length > 0 || (options.strict && dangling.length > 0);
-  if (!failed) {
-    lines.push(`Indice coherente: ${index.nodes.size} nodo(s), sin problemas.`);
-    if (dangling.length) lines.push(`(${dangling.length} id(s) referenciados aun sin ficha propia; usa --strict para exigirlos)`);
+  if (desincronizados.length) {
+    if (lines.length) lines.push('');
+    lines.push(`${desincronizados.length} hecho(s) apuntan a ficheros que ya no existen:`);
+    desincronizados.slice(0, 15).forEach((entry) => lines.push(`  ${entry.id}  ->  ${entry.file}`));
+    if (desincronizados.length > 15) lines.push(`  ... y ${desincronizados.length - 15} mas`);
+    lines.push('  Si el fichero se movio: edgelore add <id> --file <ruta nueva>');
+    lines.push('  Si ya no existe:        edgelore prune --apply');
   }
+
+  if (sospechosos.length) {
+    if (lines.length) lines.push('');
+    lines.push(`${sospechosos.length} id(s) referenciados que nadie declara y no genera ninguna regla:`);
+    sospechosos.slice(0, 15).forEach((id) => lines.push(`  ${id}`));
+    if (sospechosos.length > 15) lines.push(`  ... y ${sospechosos.length - 15} mas`);
+    lines.push('  Suelen ser restos de un renombrado hecho sin `edgelore rename`.');
+  }
+
+  if (!lines.length) {
+    lines.push(`Indice coherente: ${index.nodes.size} nodo(s), sin problemas.`);
+  }
+  if (esperados.length) {
+    lines.push('', `(${esperados.length} miembro(s) generados por reglas sin ficha propia: es lo normal)`);
+  }
+
+  // Solo el esquema rompe el build por defecto.
+  const failed = errores.length > 0
+    || (options.strict && (desincronizados.length > 0 || sospechosos.length > 0));
   return { output: lines.join('\n'), code: failed ? 1 : 0 };
+}
+
+/**
+ * Elimina los hechos cuyo fichero ya no existe.
+ *
+ * `validate` avisa de la desincronizacion pero no puede resolverla: si el
+ * fichero se movio hay que reapuntarlo, y si desaparecio hay que borrar el
+ * hecho. Por eso se lista por defecto y solo se borra con --apply: un hecho
+ * lleva dentro el porque, que es lo caro de recuperar.
+ */
+export function cmdPrune(args, options) {
+  const root = requireStoreRoot();
+  const index = loadIndex(root);
+  const huerfanos = [...index.nodes.values()]
+    .filter((node) => node.file && !fs.existsSync(path.join(root, node.file)))
+    .sort((a, b) => a.id.localeCompare(b.id));
+
+  if (!huerfanos.length) {
+    return { output: 'Ningun hecho apunta a un fichero inexistente.' };
+  }
+
+  const lines = [];
+  if (!options.apply) {
+    lines.push(`${huerfanos.length} hecho(s) apuntan a ficheros que ya no existen:`);
+    huerfanos.forEach((node) => {
+      const entrantes = (index.incoming.get(node.id) ?? []).length;
+      lines.push(`  ${node.id}  ->  ${node.file}${entrantes ? `   (${entrantes} arista(s) apuntan a el)` : ''}`);
+    });
+    lines.push(
+      '',
+      'Nada se ha borrado. Antes de borrar, comprueba si el fichero se movio:',
+      '  edgelore add <id> --file <ruta nueva>     conserva el hecho y sus notas',
+      '',
+      'Para eliminarlos de verdad: edgelore prune --apply',
+    );
+    return { output: lines.join('\n'), code: 1 };
+  }
+
+  for (const node of huerfanos) fs.rmSync(nodePath(root, node.id), { force: true });
+  lines.push(`Eliminados ${huerfanos.length} hecho(s):`);
+  huerfanos.forEach((node) => lines.push(`  ${node.id}`));
+  const rotas = huerfanos.filter((node) => (index.incoming.get(node.id) ?? []).length);
+  if (rotas.length) {
+    lines.push('', `Aviso: ${rotas.length} de ellos tenian aristas entrantes, que quedan colgando.`);
+    lines.push('Revisa con: edgelore validate');
+  }
+  return { output: lines.join('\n') };
 }
 
 /**

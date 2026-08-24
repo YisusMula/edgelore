@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cmdQuery, cmdImpact, cmdFind, cmdPath, cmdStats, cmdKinds, cmdChecklist, cmdValidate, cmdStale } from '../src/commands/read.js';
+import { cmdQuery, cmdImpact, cmdFind, cmdPath, cmdStats, cmdKinds, cmdChecklist, cmdValidate, cmdStale, cmdPrune } from '../src/commands/read.js';
 import { cmdAdd, cmdLink, cmdVerify, cmdRemove, cmdRename } from '../src/commands/write.js';
 import { cmdInit, cmdUninstall, cmdRules, availableRuleSets } from '../src/commands/init.js';
 import { cmdHook } from '../src/commands/hook.js';
@@ -72,6 +72,7 @@ const COMMANDS = {
   rename: { run: cmdRename, help: 'Cambia el id de un nodo y reapunta todo lo que le referenciaba.' },
   remove: { run: cmdRemove, help: 'Elimina un hecho.' },
   validate: { run: cmdValidate, help: 'Comprueba la coherencia del indice. Pensado para CI.' },
+  prune: { run: cmdPrune, help: 'Lista (o con --apply borra) los hechos cuyo fichero ya no existe.' },
   stale: { run: cmdStale, help: 'Lista los hechos cuyo codigo cambio despues de verificarlos.' },
   stats: { run: cmdStats, help: 'Cobertura del indice.' },
   kinds: { run: cmdKinds, help: 'Tipos de nodo declarados por las reglas activas.' },
@@ -102,7 +103,8 @@ ${Object.entries(CONFIDENCE).map(([key, text]) => `  ${key.padEnd(11)} ${text}`)
 OPCIONES COMUNES
   --json          Salida en JSON para herramientas.
   --brief         Omite las notas largas en query.
-  --strict        En validate, exige ficha propia para todo id referenciado.
+  --strict        En validate, la desincronizacion con el codigo tambien rompe.
+  --apply         En prune, borra de verdad. Sin el, solo lista.
   --unverified    Al escribir, no sella el hecho como verificado.
   --confidence X  certain, likely o unverified.
   --all           En query/impact, lista todas las dependencias sin recortar.

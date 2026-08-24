@@ -4,13 +4,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { loadIndex, writeNode, readNode, findStoreRoot, incomingEdges, danglingIds } from '../src/store.js';
+import { loadIndex, writeNode, readNode, findStoreRoot, incomingEdges, danglingIds, classifyDangling } from '../src/store.js';
 import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact, moduleOf, workList, renderWorkList, didYouMean, suggest } from '../src/query.js';
 import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
 import { parseEdgeFlag, cmdAdd, cmdLink, cmdRename } from '../src/commands/write.js';
 import { cmdInit, cmdUninstall, cmdRules, detectRuleSets } from '../src/commands/init.js';
+import { cmdValidate, cmdPrune } from '../src/commands/read.js';
 import { parseArgs } from '../bin/edgelore.js';
 
 /** Repositorio temporal con Edgelore instalado, para pruebas aisladas. */
@@ -865,4 +866,71 @@ test('la sugerencia por subcadena sigue teniendo prioridad', () => {
   const root = sandbox();
   writeNode(root, { id: 'Erp.Ventas.PagoService', edges: [] });
   assert.deepEqual(didYouMean(loadIndex(root), 'PagoService'), ['Erp.Ventas.PagoService']);
+});
+
+test('validate no rompe el build porque el codigo se haya movido', () => {
+  // Simulado sobre 6 meses de uso, el 32% de los hechos acababa apuntando a
+  // ficheros borrados. Romper el CI por eso lo deja en rojo permanente desde el
+  // primer mes, y un CI en rojo permanente se ignora.
+  inSandbox((root) => {
+    writeNode(root, { id: 'Erp.A.Borrada', file: 'src/borrada.cs', edges: [] });
+    const resultado = cmdValidate([], {});
+    assert.equal(resultado.code, 0, 'la desincronizacion informa, no rompe');
+    assert.match(resultado.output, /ya no existen/);
+    assert.equal(cmdValidate([], { strict: true }).code, 1, 'con --strict si rompe');
+  });
+});
+
+test('validate si rompe el build por un hecho mal escrito', () => {
+  inSandbox((root) => {
+    fs.writeFileSync(path.join(root, '.edgelore', 'nodes', 'malo.md'), 'esto no es frontmatter\n');
+    const resultado = cmdValidate([], {});
+    assert.equal(resultado.code, 1);
+    assert.match(resultado.output, /error\(es\) de esquema/);
+  });
+});
+
+test('los miembros generados por reglas no cuentan como sospechosos', () => {
+  // Eran 148 de 148 en la simulacion: presentarlos como problema hace que nadie
+  // mire la lista, y ahi es donde se esconde el resto de renombrado que si importa.
+  const root = sandbox();
+  writeNode(root, {
+    id: 'Erp.A.Pagina',
+    kind: 'maui-page',
+    edges: [{ to: 'Erp.A.Pagina.OnAppearing', type: 'lifecycle', trigger: 'al aparecer', source: 'rule:dotnet-maui' }],
+  });
+  writeNode(root, { id: 'Otro', edges: [{ to: 'Erp.A.RestoDeRenombrado', type: 'calls' }] });
+
+  const { esperados, sospechosos } = classifyDangling(loadIndex(root));
+  assert.deepEqual(esperados, ['Erp.A.Pagina.OnAppearing']);
+  assert.deepEqual(sospechosos, ['Erp.A.RestoDeRenombrado']);
+});
+
+test('prune lista sin borrar y solo borra con --apply', () => {
+  inSandbox((root) => {
+    writeNode(root, { id: 'Fantasma', file: 'src/ya-no-esta.cs', edges: [] }, 'El porque.');
+    const listado = cmdPrune([], {});
+    assert.equal(listado.code, 1);
+    assert.match(listado.output, /Nada se ha borrado/);
+    assert.ok(readNode(root, 'Fantasma'), 'sin --apply no toca nada');
+
+    cmdPrune([], { apply: true });
+    assert.equal(readNode(root, 'Fantasma'), null);
+  });
+});
+
+test('prune avisa de las aristas que quedarian colgando al borrar', () => {
+  inSandbox((root) => {
+    writeNode(root, { id: 'Fantasma', file: 'src/no.cs', edges: [] });
+    writeNode(root, { id: 'Citante', edges: [{ to: 'Fantasma', type: 'calls' }] });
+    assert.match(cmdPrune([], {}).output, /1 arista\(s\) apuntan a el/);
+    assert.match(cmdPrune([], { apply: true }).output, /quedan colgando/);
+  });
+});
+
+test('prune no dice nada cuando todo esta sincronizado', () => {
+  inSandbox((root) => {
+    writeNode(root, { id: 'SinFichero', edges: [] });
+    assert.match(cmdPrune([], {}).output, /Ningun hecho apunta/);
+  });
 });
