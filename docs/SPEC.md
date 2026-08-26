@@ -94,6 +94,24 @@ meses se lee hoy con la misma confianza que uno recién comprobado. `confidence`
 dice cuánto se comprobó; `verified.commit` permite a `edgelore stale` detectar que el
 código cambió después. Sin ambos campos el índice se pudre en silencio.
 
+**La confianza decae al mostrarse, no en el fichero.** Nadie puede recalcular si
+un hecho sigue siendo cierto sin mirarlo, así que Edgelore no degrada
+`confidence` por su cuenta — sería inventarse una verdad. Lo que sí hace es
+dejar de imprimir el sello a secas: pasados `--max-age` días (365 por defecto),
+`query` añade `<- sin reverificar desde hace N meses` e `impact` resume cuántos
+de los dependientes listados están en esa situación. Un nodo con aristas y sin
+`verified` se marca `SIN VERIFICAR`. No se añade ningún campo: el dato ya
+estaba en `verified.date`.
+
+**El texto libre se acota al renderizar.** `summary` lo limita el esquema a 300
+caracteres, pero `note`, `trigger`, `at` y el cuerpo del markdown (`notes`) no
+tienen límite en disco — y no deben tenerlo, porque ahí es donde se explica lo
+que costó descubrir. El límite está en la salida: 200 caracteres por campo
+inline y 1.200 para el cuerpo, indicando siempre cuánto se ha recortado. Es
+condición de que el índice ahorre: una consulta que devuelve 10 KB cuesta más
+que la búsqueda que evita, y ese texto es además lo que el hook previo a la
+edición inyecta sin que nadie lo pida. `--all` lo levanta todo.
+
 ## Reglas de identificación
 
 - Un id casa con `^[A-Za-z_][\w.+-]*(/[\w.+-]+)*$` y no pasa de 200 caracteres.

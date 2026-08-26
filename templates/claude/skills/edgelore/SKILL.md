@@ -87,6 +87,23 @@ Trata cada hecho segun su etiqueta de confianza. `~SIN VERIFICAR` y `~probable`
 son pistas que hay que comprobar, no verdades. Si `edgelore stale` marca un hecho, el
 codigo cambio despues de verificarlo: leelo antes de fiarte.
 
+Hay dos marcas mas que significan lo mismo -este hecho puede estar mintiendo-:
+
+- `<- sin reverificar desde hace N meses` en la linea `verificado:`. El hecho se
+  comprobo, pero hace mucho. Cuanto mas viejo, mas barato sale confirmarlo
+  leyendo el codigo antes de construir nada encima.
+- `SIN VERIFICAR: nadie ha confirmado este hecho todavia` cuando el nodo no
+  tiene sello. Alguien lo escribio y nadie lo ha comprobado nunca.
+
+`impact` te dice en una linea cuantos de los dependientes listados estan en ese
+estado. Si vas a apoyar un cambio en uno de ellos, abrelo y confirmalo, y sella
+lo que confirmes con `edgelore verify <id>`: es lo que evita que la proxima
+persona pague la misma comprobacion.
+
+Cuando un texto salga cortado con `[...+N caracteres]`, la salida esta acotada a
+proposito. Si de verdad necesitas el resto, `edgelore query <id> --all`; casi
+nunca hace falta.
+
 ## Despues de descubrir: registra
 
 Este es el habito que hace que el indice crezca. **Cuando acabas de investigar

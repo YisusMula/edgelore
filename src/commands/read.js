@@ -30,9 +30,21 @@ import {
   workList,
   renderWorkList,
   didYouMean,
+  ageInDays,
+  formatAge,
+  DEFAULT_MAX_AGE_DAYS,
 } from '../query.js';
 import { loadRules, kindCatalog, renderKinds, checklistFor, renderChecklist } from '../rules.js';
 import { changedSince, filesChangedSince, isGitRepo, lastCommitFor } from '../git.js';
+
+/**
+ * Umbral de reverificacion en dias. Sin --max-age vale el de por defecto, que
+ * es lo que hace que el desgaste se vea sin tener que pedirlo.
+ */
+function maxAgeFrom(options) {
+  const value = Number(options['max-age']);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_MAX_AGE_DAYS;
+}
 
 export function cmdQuery(args, options) {
   const id = args[0];
@@ -53,7 +65,13 @@ export function cmdQuery(args, options) {
   }
 
   if (options.json) return { output: JSON.stringify(result, null, 2) };
-  return { output: renderNeighbourhood(result, { notes: !options.brief, limit: options.all ? 0 : options.limit }) };
+  return {
+    output: renderNeighbourhood(result, {
+      notes: !options.brief,
+      limit: options.all ? 0 : options.limit,
+      maxAgeDays: maxAgeFrom(options),
+    }),
+  };
 }
 
 /**
@@ -86,7 +104,12 @@ export function cmdImpact(args, options) {
     const lista = workList(result, { module: options.module });
     return { output: renderWorkList(result, lista, { module: options.module }) };
   }
-  return { output: renderImpact(result, index, { limit: options.all ? 0 : options.limit }) };
+  return {
+    output: renderImpact(result, index, {
+      limit: options.all ? 0 : options.limit,
+      maxAgeDays: maxAgeFrom(options),
+    }),
+  };
 }
 
 export function cmdFind(args, options) {
@@ -177,6 +200,23 @@ export function cmdValidate(args, options) {
     }
   }
 
+  // Tercera categoria, y solo bajo peticion explicita: hechos que nadie
+  // reverifica desde hace demasiado. No entra en la salida por defecto a
+  // proposito. El desgaste por antiguedad es continuo y universal -todo hecho
+  // envejece-, asi que informar de el sin que nadie lo haya pedido converge en
+  // una lista que crece cada dia y que se acaba ignorando, arrastrando consigo
+  // la atencion sobre las dos categorias que si son accionables.
+  const caducados = [];
+  if (options['max-age'] !== undefined) {
+    const maxAgeDays = maxAgeFrom(options);
+    for (const node of index.nodes.values()) {
+      if (!node.verified?.commit) continue;
+      const days = ageInDays(node.verified.date);
+      if (days !== null && days >= maxAgeDays) caducados.push({ id: node.id, days });
+    }
+    caducados.sort((a, b) => b.days - a.days || a.id.localeCompare(b.id));
+  }
+
   const { esperados, sospechosos } = classifyDangling(index);
   const lines = [];
 
@@ -202,6 +242,14 @@ export function cmdValidate(args, options) {
     lines.push('  Suelen ser restos de un renombrado hecho sin `edgelore rename`.');
   }
 
+  if (caducados.length) {
+    if (lines.length) lines.push('');
+    lines.push(`${caducados.length} hecho(s) sin reverificar desde hace mas de ${maxAgeFrom(options)} dias:`);
+    caducados.slice(0, 15).forEach((entry) => lines.push(`  ${entry.id}  (${formatAge(entry.days)})`));
+    if (caducados.length > 15) lines.push(`  ... y ${caducados.length - 15} mas`);
+    lines.push('  Confirmalos con: edgelore verify <id>');
+  }
+
   if (!lines.length) {
     lines.push(`Indice coherente: ${index.nodes.size} nodo(s), sin problemas.`);
   }
@@ -211,7 +259,7 @@ export function cmdValidate(args, options) {
 
   // Solo el esquema rompe el build por defecto.
   const failed = errores.length > 0
-    || (options.strict && (desincronizados.length > 0 || sospechosos.length > 0));
+    || (options.strict && (desincronizados.length > 0 || sospechosos.length > 0 || caducados.length > 0));
   return { output: lines.join('\n'), code: failed ? 1 : 0 };
 }
 

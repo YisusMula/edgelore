@@ -32,3 +32,7 @@ jobs:
       # ignora. Se deja visible para que alguien lo limpie con `edgelore prune`.
       - run: edgelore stale || true
       - run: edgelore prune || true
+      # Politica de reverificacion. NO se pone aqui a proposito: todo hecho
+      # envejece, asi que en cada pull request acabaria senalando practicamente
+      # el indice entero. Si quereis imponerla, va en un job nocturno aparte:
+      #   edgelore validate --max-age 365 --strict

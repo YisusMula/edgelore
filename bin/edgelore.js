@@ -19,7 +19,7 @@ import { EDGE_TYPES, CONFIDENCE } from '../src/model.js';
 const VERSION = '0.1.0';
 
 /** Banderas que aceptan valor; el resto son booleanas. Repetibles marcadas aparte. */
-const VALUE_FLAGS = new Set(['file', 'kind', 'summary', 'lang', 'note', 'trigger', 'at', 'confidence', 'dir', 'limit', 'depth', 'module']);
+const VALUE_FLAGS = new Set(['file', 'kind', 'summary', 'lang', 'note', 'trigger', 'at', 'confidence', 'dir', 'limit', 'depth', 'module', 'max-age']);
 const LIST_FLAGS = new Set(['edge', 'tag', 'rules']);
 
 export function parseArgs(argv) {
@@ -50,7 +50,7 @@ export function parseArgs(argv) {
       // `--rules a,b` y `--rules a --rules b` son equivalentes.
       options[name].push(...String(value).split(',').map((part) => part.trim()).filter(Boolean));
     } else if (VALUE_FLAGS.has(name)) {
-      options[name] = name === 'limit' || name === 'depth' ? Number(value) : value;
+      options[name] = name === 'limit' || name === 'depth' || name === 'max-age' ? Number(value) : value;
     } else {
       options[name] = true;
     }
@@ -111,6 +111,9 @@ OPCIONES COMUNES
   --limit N       Cuantas listar por nivel antes de resumir (por defecto 12).
   --files         En impact, la lista de trabajo: ficheros concretos a revisar.
   --module P      Limita a los ids que empiecen por ese prefijo de modulo.
+  --max-age N     Dias tras los que un hecho verificado se marca como no
+                  reverificado (por defecto 365). En validate, ademas lista
+                  los que lo superan; con --strict, rompe.
 
 CONFIANZA POR DEFECTO
   edgelore link         certain      es una afirmacion deliberada sobre una relacion

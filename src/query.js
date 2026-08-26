@@ -12,6 +12,75 @@ import { incomingEdges } from './store.js';
 
 const CONFIDENCE_MARK = { certain: '', likely: ' ~probable', unverified: ' ~SIN VERIFICAR' };
 
+/**
+ * Topes de texto libre.
+ *
+ * `summary`, `note` y `trigger` los escribe una persona y el esquema solo acota
+ * el primero (300 caracteres en validateNode); `notes` es el cuerpo entero del
+ * markdown y no lo acota nada. Sin tope aqui, `edgelore add X --note "<10 KB>"`
+ * hace que `query X` devuelva 10 KB, y ese texto es ademas justo lo que el hook
+ * previo a la edicion inyecta en el contexto sin que nadie lo pida. Un indice
+ * que puede devolver miles de tokens en una consulta deja de ahorrar, que es la
+ * unica razon por la que existe.
+ *
+ * Nada se pierde: se dice cuanto falta y donde esta el fichero completo.
+ */
+const MAX_INLINE = 200;
+const MAX_NOTES = 1200;
+
+/**
+ * Recorta a `max` sin partir una palabra por la mitad cuando se puede evitar.
+ * Devuelve el texto tal cual si cabe, para no tocar el caso mayoritario.
+ */
+export function clamp(text, max, { suffix = '' } = {}) {
+  const value = String(text ?? '');
+  if (value.length <= max) return value;
+  const corte = value.slice(0, max);
+  const espacio = corte.lastIndexOf(' ');
+  const cuerpo = espacio > max * 0.6 ? corte.slice(0, espacio) : corte;
+  const resto = value.length - cuerpo.length;
+  return `${cuerpo.trimEnd()} [...+${resto} caracteres${suffix}]`;
+}
+
+/** Dias transcurridos desde una fecha ISO `YYYY-MM-DD`, o null si no es valida. */
+export function ageInDays(date, now = Date.now()) {
+  if (typeof date !== 'string') return null;
+  const parsed = Date.parse(`${date.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(parsed)) return null;
+  return Math.floor((now - parsed) / 86400000);
+}
+
+/** "hace 18 meses" en la unidad que menos ruido mete. */
+export function formatAge(days) {
+  if (days < 0) return 'con fecha futura';
+  if (days < 45) return `hace ${days} dia${days === 1 ? '' : 's'}`;
+  const meses = Math.round(days / 30);
+  if (meses < 18) return `hace ${meses} meses`;
+  const anios = Math.floor(days / 365);
+  const resto = Math.round((days - anios * 365) / 30);
+  return resto ? `hace ${anios} ano(s) y ${resto} meses` : `hace ${anios} ano(s)`;
+}
+
+/**
+ * A partir de cuando un hecho sellado deja de merecer la misma credibilidad.
+ *
+ * La confianza no caduca de golpe ni se puede recalcular sola: nadie sabe si un
+ * hecho sigue siendo cierto sin mirarlo. Lo unico honesto es no seguir
+ * imprimiendo `certain` a secas cuando la comprobacion es de hace ano y medio.
+ * El dato ya estaba en verified.date; lo unico que cambia es que se muestra.
+ */
+export const DEFAULT_MAX_AGE_DAYS = 365;
+
+/**
+ * Etiqueta de desgaste de un sello de verificacion, o null si no procede.
+ * Un hecho sin sellar no "decae": nunca se verifico, y eso se dice aparte.
+ */
+export function decayLabel(verified, { maxAgeDays = DEFAULT_MAX_AGE_DAYS, now = Date.now() } = {}) {
+  const days = ageInDays(verified?.date, now);
+  if (days === null || days < maxAgeDays) return null;
+  return `sin reverificar desde ${formatAge(days)}`;
+}
+
 /** Las aristas que grep no puede encontrar: el motivo por el que existe Edgelore. */
 const HIDDEN_TYPES = new Set(['string-ref', 'lifecycle', 'event', 'config', 'schedules', 'affects']);
 
@@ -75,13 +144,14 @@ function typeHistogram(entries) {
     .join(', ');
 }
 
-function formatEdge(edge, { direction }) {
+function formatEdge(edge, { direction, completo = false }) {
   const peer = direction === 'in' ? edge.from : edge.to;
   const parts = [`  ${edge.type.padEnd(11)} ${peer}`];
+  const corta = (text) => (completo ? String(text) : clamp(text, MAX_INLINE));
   const detail = [];
-  if (edge.trigger) detail.push(`disparado por: ${edge.trigger}`);
-  if (edge.at) detail.push(`en ${edge.at}`);
-  if (edge.note) detail.push(edge.note);
+  if (edge.trigger) detail.push(`disparado por: ${corta(edge.trigger)}`);
+  if (edge.at) detail.push(`en ${corta(edge.at)}`);
+  if (edge.note) detail.push(corta(edge.note));
   if (edge.source && edge.source !== 'human') detail.push(`via ${edge.source}`);
   const mark = CONFIDENCE_MARK[edge.confidence ?? 'unverified'] ?? '';
   if (detail.length) parts.push(`\n${' '.repeat(14)}${detail.join(' | ')}`);
@@ -107,7 +177,7 @@ export function neighbourhood(index, id) {
  */
 function renderEdgeList(edges, direction, limit) {
   if (limit <= 0 || edges.length <= limit) {
-    return edges.map((edge) => formatEdge(edge, { direction }));
+    return edges.map((edge) => formatEdge(edge, { direction, completo: limit <= 0 }));
   }
   const groups = groupByModule(edges.map((edge) => ({
     id: direction === 'in' ? edge.from : edge.to,
@@ -129,17 +199,28 @@ function renderEdgeList(edges, direction, limit) {
   return lines;
 }
 
-export function renderNeighbourhood(result, { notes = true, limit = DEFAULT_LEVEL_LIMIT } = {}) {
+export function renderNeighbourhood(result, { notes = true, limit = DEFAULT_LEVEL_LIMIT, maxAgeDays = DEFAULT_MAX_AGE_DAYS, now = Date.now() } = {}) {
   const lines = [];
   const { id, node, outgoing, incoming } = result;
+  // --all (limit <= 0) tambien levanta el tope del texto libre: quien lo pide
+  // explicitamente esta pidiendo el contenido entero.
+  const completo = limit <= 0;
 
   if (node) {
     lines.push(`${id}${node.kind ? `  [${node.kind}]` : ''}`);
     if (node.file) lines.push(`  archivo: ${node.file}`);
-    if (node.summary) lines.push(`  ${node.summary}`);
+    if (node.summary) lines.push(`  ${completo ? node.summary : clamp(node.summary, MAX_INLINE)}`);
     if (node.tags?.length) lines.push(`  tags: ${node.tags.join(', ')}`);
     if (node.verified?.commit) {
-      lines.push(`  verificado: ${node.verified.commit}${node.verified.date ? ` (${node.verified.date})` : ''}`);
+      const decay = decayLabel(node.verified, { maxAgeDays, now });
+      lines.push(
+        `  verificado: ${node.verified.commit}${node.verified.date ? ` (${node.verified.date})` : ''}` +
+          (decay ? `  <- ${decay}` : ''),
+      );
+    } else if (node.edges?.length) {
+      // Un hecho que nadie confirmo nunca se lee igual de convencido que uno
+      // sellado ayer. Decirlo cuesta una linea.
+      lines.push('  SIN VERIFICAR: nadie ha confirmado este hecho todavia.');
     }
   } else {
     lines.push(`${id}  [sin ficha propia]`);
@@ -160,7 +241,9 @@ export function renderNeighbourhood(result, { notes = true, limit = DEFAULT_LEVE
     lines.push('', 'Sin aristas registradas todavia.');
   }
 
-  if (notes && node?.notes) lines.push('', 'NOTAS:', node.notes);
+  if (notes && node?.notes) {
+    lines.push('', 'NOTAS:', completo ? node.notes : clamp(node.notes, MAX_NOTES, { suffix: '; --all para verlo entero' }));
+  }
   return lines.join('\n');
 }
 
@@ -251,7 +334,7 @@ export function didYouMean(index, id, { limit = 3 } = {}) {
 export function renderSearch(hits, term) {
   if (!hits.length) return `Sin resultados para "${term}".`;
   return hits
-    .map((hit) => `${hit.id}  (${hit.where.join(', ')})${hit.summary ? `\n  ${hit.summary}` : ''}`)
+    .map((hit) => `${hit.id}  (${hit.where.join(', ')})${hit.summary ? `\n  ${clamp(hit.summary, MAX_INLINE)}` : ''}`)
     .join('\n');
 }
 
@@ -296,7 +379,7 @@ export function renderPath(steps, fromId, toId) {
   for (const step of steps) {
     const arrow = step.direction === 'out' ? '-->' : '<--';
     const peer = step.direction === 'out' ? step.to : step.from;
-    lines.push(`  ${arrow} [${step.type}]${step.trigger ? ` ${step.trigger}` : ''}`);
+    lines.push(`  ${arrow} [${step.type}]${step.trigger ? ` ${clamp(step.trigger, MAX_INLINE)}` : ''}`);
     lines.push(`${peer}`);
   }
   return lines.join('\n');
@@ -366,7 +449,26 @@ export function impact(index, id, { maxDepth = 4 } = {}) {
   return { id, levels, affected: reachedAt.size - 1, hidden, truncated: frontier.length > 0, known: index.nodes.has(id) };
 }
 
-export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT } = {}) {
+/**
+ * Cuantos de los dependientes mostrados afirman algo que nadie reverifica desde
+ * hace tiempo. Se da agregado, no linea a linea: repetir la antiguedad en cada
+ * entrada multiplicaria el coste de la salida justo en el caso -muchos
+ * dependientes- en el que el tope existe para evitarlo.
+ */
+function decayedCount(result, index, { maxAgeDays, now }) {
+  let viejos = 0;
+  let sinSellar = 0;
+  for (const level of result.levels) {
+    for (const entry of level.entries) {
+      const verified = index.nodes.get(entry.id)?.verified;
+      if (!verified?.commit) sinSellar += 1;
+      else if (decayLabel(verified, { maxAgeDays, now })) viejos += 1;
+    }
+  }
+  return { viejos, sinSellar };
+}
+
+export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT, maxAgeDays = DEFAULT_MAX_AGE_DAYS, now = Date.now() } = {}) {
   const lines = [`ALCANCE DE ${result.id}`];
 
   if (!result.known) {
@@ -397,9 +499,9 @@ export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT } = {}
         lines.push(`  ${entry.type.padEnd(11)} ${entry.id}${mark}${doubt}`);
         const detail = [];
         if (entry.via) detail.push(`a traves de ${entry.via}`);
-        if (entry.trigger) detail.push(entry.trigger);
-        if (entry.at) detail.push(`en ${entry.at}`);
-        if (entry.note) detail.push(entry.note);
+        if (entry.trigger) detail.push(clamp(entry.trigger, MAX_INLINE));
+        if (entry.at) detail.push(`en ${clamp(entry.at, MAX_INLINE)}`);
+        if (entry.note) detail.push(clamp(entry.note, MAX_INLINE));
         if (detail.length) lines.push(`${' '.repeat(14)}${detail.join(' | ')}`);
       }
       continue;
@@ -428,7 +530,7 @@ export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT } = {}
     // repetirlo por cada linea es puro relleno.
     const triggers = new Set(level.entries.map((entry) => entry.trigger).filter(Boolean));
     if (triggers.size === 1 && level.entries.every((entry) => entry.trigger)) {
-      lines.push(`${' '.repeat(14)}todas disparadas por: ${[...triggers][0]}`);
+      lines.push(`${' '.repeat(14)}todas disparadas por: ${clamp([...triggers][0], MAX_INLINE)}`);
     }
   }
 
@@ -438,6 +540,15 @@ export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT } = {}
   if (limit > 0 && result.levels.some((level) => level.entries.length > limit)) {
     lines.push('Listado recortado. Para verlo entero: --all (o --json para procesarlo).');
   }
+
+  const { viejos, sinSellar } = decayedCount(result, index, { maxAgeDays, now });
+  if (viejos || sinSellar) {
+    const partes = [];
+    if (viejos) partes.push(`${viejos} sin reverificar desde hace mas de ${Math.round(maxAgeDays / 30)} meses`);
+    if (sinSellar) partes.push(`${sinSellar} sin verificar nunca`);
+    lines.push('', `De los dependientes listados, ${partes.join(' y ')}. Comprobalos antes de fiarte.`);
+  }
+
   lines.push('', coverageWarning(index));
   return lines.join('\n');
 }

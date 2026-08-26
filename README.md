@@ -140,6 +140,7 @@ edgelore stale                            # hechos cuyo código cambió tras ver
 edgelore verify Erp.Ui.DetallePage        # confirmarlo en el commit actual
 edgelore rename Erp.Ui.Vieja Erp.Ui.Nueva # al refactorizar: reapunta todo lo que la citaba
 edgelore validate                         # esquema (rompe CI) + desincronización (avisa)
+edgelore validate --max-age 365           # además: hechos que nadie reverifica desde hace un año
 edgelore prune                            # hechos cuyo fichero ya no existe; --apply borra
 edgelore stats                            # cobertura
 ```
@@ -188,8 +189,11 @@ Los dos hooks cierran el círculo sin depender de que nadie se acuerde:
   ignora — perdiendo la única defensa automática contra que el índice mienta.
 - **La salida está acotada por diseño.** Ningún comando puede devolver miles de
   líneas: el índice deja de ahorrar en el momento en que una consulta cuesta más
-  que la búsqueda que evita. El hook automático es aún más estricto, porque su
-  contexto entra sin que nadie lo pida.
+  que la búsqueda que evita. Eso incluye el texto libre — notas, disparadores,
+  resúmenes — que se recorta al mostrarse indicando cuánto falta, aunque en el
+  fichero pueda ser tan largo como haga falta. El hook automático es aún más
+  estricto, porque su contexto entra sin que nadie lo pida. `--all` levanta
+  todos los topes cuando de verdad quieres el volcado.
 
 ## Lo que va a doler
 
@@ -200,13 +204,16 @@ Dicho ahora y no dentro de tres meses:
   entero.
 - **Un hecho obsoleto es peor que ninguno**, porque se lee con confianza. Por eso
   cada hecho lleva `confidence` y el commit en que se verificó, y por eso existe
-  `edgelore stale`. La disciplina no es opcional.
+  `edgelore stale`. Pasado un año sin reverificar, las consultas dejan de
+  imprimir el sello a secas y añaden `<- sin reverificar desde hace N meses`: el
+  índice no puede saber si un hecho sigue siendo cierto, pero sí puede dejar de
+  aparentar que alguien lo ha comprobado hace poco. La disciplina no es opcional.
 - **Depende del equipo.** El hook ayuda, pero si nadie registra nada, no hay
   índice. Empieza con dos o tres personas y las conexiones que más escuecen.
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 119 pruebas).
+v0.1. El núcleo curado está completo y probado (`npm test`, 132 pruebas).
 
 Siguiente paso previsto: un extractor opcional basado en Roslyn que emita hechos
 en este mismo formato con `source: extractor:roslyn`, para poblar las aristas

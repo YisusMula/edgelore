@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { loadIndex, writeNode, readNode, findStoreRoot, incomingEdges, danglingIds, classifyDangling } from '../src/store.js';
-import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact, moduleOf, workList, renderWorkList, didYouMean, suggest } from '../src/query.js';
+import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact, moduleOf, workList, renderWorkList, didYouMean, suggest, clamp, ageInDays, formatAge, decayLabel } from '../src/query.js';
 import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
@@ -932,5 +932,161 @@ test('prune no dice nada cuando todo esta sincronizado', () => {
   inSandbox((root) => {
     writeNode(root, { id: 'SinFichero', edges: [] });
     assert.match(cmdPrune([], {}).output, /Ningun hecho apunta/);
+  });
+});
+
+// --- Texto libre acotado --------------------------------------------------
+//
+// `summary` lo acota validateNode a 300 caracteres, pero `note`, `trigger` y
+// sobre todo `notes` -el cuerpo entero del markdown- no los acotaba nada. Es la
+// unica via por la que una consulta podia devolver miles de tokens, y ademas es
+// texto que el hook previo a la edicion inyecta en el contexto sin pedir
+// permiso. El README prometia que ningun comando puede devolver miles de
+// lineas; estas pruebas hacen que sea verdad.
+
+test('clamp deja intacto lo que cabe y anota cuanto recorta', () => {
+  assert.equal(clamp('corto', 100), 'corto');
+  const largo = clamp('x'.repeat(500), 100);
+  assert.ok(largo.length < 160, `recorte de ${largo.length} caracteres`);
+  assert.match(largo, /\[\.\.\.\+\d+ caracteres\]/);
+});
+
+test('clamp no parte una palabra por la mitad si puede evitarlo', () => {
+  const texto = clamp(`${'palabra '.repeat(50)}`, 100);
+  assert.ok(!/pala\b/.test(texto.split(' [...')[0].split(' ').pop()));
+});
+
+test('query acota una nota de nodo desmesurada', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'A', edges: [{ to: 'B', type: 'calls' }] }, 'linea muy larga. '.repeat(2000));
+  const texto = renderNeighbourhood(neighbourhood(loadIndex(root), 'A'));
+  assert.ok(texto.length < 2500, `salida de ${texto.length} caracteres; deberia ir acotada`);
+  assert.match(texto, /--all para verlo entero/);
+});
+
+test('--all devuelve la nota entera', () => {
+  const root = sandbox();
+  const cuerpo = 'linea muy larga. '.repeat(2000);
+  writeNode(root, { id: 'A', edges: [{ to: 'B', type: 'calls' }] }, cuerpo);
+  const texto = renderNeighbourhood(neighbourhood(loadIndex(root), 'A'), { limit: 0 });
+  assert.ok(texto.length > 30000, 'con --all no se recorta nada');
+});
+
+test('query acota tambien el texto libre de una arista', () => {
+  const root = sandbox();
+  writeNode(root, {
+    id: 'A',
+    edges: [{ to: 'B', type: 'string-ref', at: 'src/A.cs:1', note: 'nota kilometrica. '.repeat(500) }],
+  });
+  const texto = renderNeighbourhood(neighbourhood(loadIndex(root), 'A'));
+  assert.ok(texto.length < 1500, `salida de ${texto.length} caracteres`);
+  assert.match(texto, /\[\.\.\.\+\d+ caracteres\]/);
+});
+
+test('impact acota el texto libre que inyecta el hook', () => {
+  const root = sandbox();
+  writeNode(root, {
+    id: 'Dep',
+    edges: [{ to: 'Hub', type: 'lifecycle', trigger: 'disparador larguisimo. '.repeat(500) }],
+  });
+  writeNode(root, { id: 'Hub', edges: [] });
+  const index = loadIndex(root);
+  const texto = renderImpact(impact(index, 'Hub'), index);
+  assert.ok(texto.length < 1800, `salida de ${texto.length} caracteres`);
+  assert.match(texto, /\[\.\.\.\+\d+ caracteres\]/);
+});
+
+// --- Decaimiento de la confianza ------------------------------------------
+//
+// Un `certain` sellado hace tres anos se lee con la misma seguridad que uno de
+// ayer, y esa es justo la forma en que un indice curado miente. No se puede
+// recalcular la verdad de un hecho sin mirarlo; lo unico honesto es dejar de
+// imprimir la etiqueta a secas. El dato ya estaba en verified.date.
+
+test('ageInDays y formatAge convierten un sello en algo legible', () => {
+  const ahora = Date.parse('2026-08-26T00:00:00Z');
+  assert.equal(ageInDays('2026-08-20', ahora), 6);
+  assert.equal(ageInDays('sin fecha', ahora), null);
+  assert.equal(ageInDays(undefined, ahora), null);
+  assert.match(formatAge(6), /hace 6 dias/);
+  assert.match(formatAge(700), /ano/);
+});
+
+test('decayLabel calla mientras el sello es reciente', () => {
+  const ahora = Date.parse('2026-08-26T00:00:00Z');
+  assert.equal(decayLabel({ date: '2026-06-01' }, { now: ahora }), null);
+  assert.equal(decayLabel({}, { now: ahora }), null, 'sin fecha no se inventa antiguedad');
+  assert.match(decayLabel({ date: '2023-02-01' }, { now: ahora }), /sin reverificar/);
+});
+
+test('query marca un hecho verificado hace demasiado', () => {
+  const root = sandbox();
+  writeNode(root, {
+    id: 'A',
+    edges: [{ to: 'B', type: 'calls', confidence: 'certain' }],
+    verified: { commit: 'abc1234', date: '2023-02-01' },
+  });
+  const texto = renderNeighbourhood(neighbourhood(loadIndex(root), 'A'), {
+    now: Date.parse('2026-08-26T00:00:00Z'),
+  });
+  assert.match(texto, /sin reverificar desde/);
+});
+
+test('query no marca nada cuando el sello es reciente', () => {
+  const root = sandbox();
+  writeNode(root, {
+    id: 'A',
+    edges: [{ to: 'B', type: 'calls' }],
+    verified: { commit: 'abc1234', date: '2026-08-01' },
+  });
+  const texto = renderNeighbourhood(neighbourhood(loadIndex(root), 'A'), {
+    now: Date.parse('2026-08-26T00:00:00Z'),
+  });
+  assert.ok(!texto.includes('sin reverificar'), texto);
+});
+
+test('query dice cuando un hecho no lo ha confirmado nadie', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'A', edges: [{ to: 'B', type: 'calls' }] });
+  const texto = renderNeighbourhood(neighbourhood(loadIndex(root), 'A'));
+  assert.match(texto, /SIN VERIFICAR: nadie ha confirmado/);
+});
+
+test('impact resume cuantos dependientes estan sin reverificar', () => {
+  const root = sandbox();
+  writeNode(root, {
+    id: 'Viejo',
+    edges: [{ to: 'Hub', type: 'calls' }],
+    verified: { commit: 'aaa1111', date: '2023-02-01' },
+  });
+  writeNode(root, { id: 'Nunca', edges: [{ to: 'Hub', type: 'calls' }] });
+  writeNode(root, { id: 'Hub', edges: [] });
+  const index = loadIndex(root);
+  const texto = renderImpact(impact(index, 'Hub'), index, { now: Date.parse('2026-08-26T00:00:00Z') });
+  assert.match(texto, /1 sin reverificar desde hace mas de 12 meses/);
+  assert.match(texto, /1 sin verificar nunca/);
+});
+
+test('validate calla sobre la antiguedad salvo que se le pida', () => {
+  // Misma regla que con la desincronizacion: todo hecho envejece, asi que una
+  // lista de caducados en la salida por defecto crece cada dia hasta que se
+  // ignora, y arrastra consigo la atencion sobre lo que si es accionable.
+  inSandbox((root) => {
+    writeNode(root, {
+      id: 'A',
+      edges: [{ to: 'B', type: 'calls' }],
+      verified: { commit: 'aaa1111', date: '2019-01-01' },
+    });
+    writeNode(root, { id: 'B', edges: [] });
+
+    const callado = cmdValidate([], {});
+    assert.ok(!callado.output.includes('sin reverificar'), callado.output);
+    assert.equal(callado.code, 0);
+
+    const pedido = cmdValidate([], { 'max-age': 365 });
+    assert.match(pedido.output, /1 hecho\(s\) sin reverificar desde hace mas de 365 dias/);
+    assert.equal(pedido.code, 0, 'informar no rompe el build');
+
+    assert.equal(cmdValidate([], { 'max-age': 365, strict: true }).code, 1, 'con --strict si rompe');
   });
 });
