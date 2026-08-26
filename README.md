@@ -78,6 +78,11 @@ está al día. Edgelore cubre lo que grep no puede ver:
 | ¿Quién escribe en esta tabla? | **edgelore** |
 | ¿Qué se rompe si cambio esta clave de config? | **edgelore** |
 
+**No necesita git.** Detecta que un hecho se ha quedado atrás comparando una
+huella del contenido del fichero, no el historial. Funciona igual en SVN,
+Mercurial, Perforce o un árbol exportado sin historia; donde hay git, además
+anota el commit para que tengas algo que teclear.
+
 **No es una red neuronal ni un índice vectorial.** Son ficheros Markdown con
 frontmatter y un CLI que los consulta. Sin embeddings, sin base de datos, sin
 API keys, sin telemetría, sin ninguna dependencia externa: nada sale de tu
@@ -134,18 +139,49 @@ edgelore path AppShell Facturas           # cómo conecta A con B
 edgelore add Erp.Ui.DetallePage --file src/Ui/DetallePage.xaml.cs --kind maui-page
 edgelore link AppShell Erp.Ui.DetallePage string-ref \
   --at src/AppShell.xaml.cs:42 --note 'registrada como ruta "detalle"'
+# el ancla del literal se guarda sola, para poder reajustar la línea después
 
 # mantener
 edgelore stale                            # hechos cuyo código cambió tras verificarlos
 edgelore verify Erp.Ui.DetallePage        # confirmarlo en el commit actual
 edgelore rename Erp.Ui.Vieja Erp.Ui.Nueva # al refactorizar: reapunta todo lo que la citaba
+edgelore relocate                         # referencias fichero:linea desplazadas; --apply reajusta
 edgelore validate                         # esquema (rompe CI) + desincronización (avisa)
+edgelore validate --max-age 365           # además: hechos que nadie reverifica desde hace un año
 edgelore prune                            # hechos cuyo fichero ya no existe; --apply borra
 edgelore stats                            # cobertura
+edgelore suggest                          # por dónde empezar y qué revisar
 ```
 
 `edgelore kinds` lista los tipos de nodo que conocen las reglas activas, y
 `edgelore checklist <kind>` te dice qué comprobar al registrar uno.
+
+## Por dónde empezar
+
+Empezar en cero es el obstáculo real, y «registra lo que ya os ha hecho perder
+tiempo» es buen consejo sin herramienta detrás. `edgelore suggest` lo convierte
+en una lista:
+
+```
+$ edgelore suggest
+
+POR CUBRIR - lo mas tocado en los ultimos 90 dias sin ningun hecho:
+  16 commits  2 personas  src/Ventas/PagoService.cs
+  13 commits  1 persona   src/Ui/DetallePage.xaml.cs
+   ...
+
+POR REVISAR - hechos de los que depende mas gente y nadie confirma:
+    4 dependientes  Erp.Base.PageBase  (sin reverificar desde hace 2 años)
+```
+
+Son dos preguntas distintas. La primera ordena por **commits × personas**, no
+por commits: un fichero que toca una sola persona cincuenta veces es su área;
+uno que tocan seis personas veinte veces es conocimiento que se re-aprende cada
+vez, y ahí es donde un índice paga. Es una heurística y la salida lo dice.
+
+La segunda es la que evita el fallo caro: un hecho del que dependen cuarenta
+cosas y que lleva dos años sin confirmarse hace más daño que veinte hechos hoja
+obsoletos.
 
 ## Cómo crece solo
 
@@ -188,8 +224,11 @@ Los dos hooks cierran el círculo sin depender de que nadie se acuerde:
   ignora — perdiendo la única defensa automática contra que el índice mienta.
 - **La salida está acotada por diseño.** Ningún comando puede devolver miles de
   líneas: el índice deja de ahorrar en el momento en que una consulta cuesta más
-  que la búsqueda que evita. El hook automático es aún más estricto, porque su
-  contexto entra sin que nadie lo pida.
+  que la búsqueda que evita. Eso incluye el texto libre — notas, disparadores,
+  resúmenes — que se recorta al mostrarse indicando cuánto falta, aunque en el
+  fichero pueda ser tan largo como haga falta. El hook automático es aún más
+  estricto, porque su contexto entra sin que nadie lo pida. `--all` levanta
+  todos los topes cuando de verdad quieres el volcado.
 
 ## Lo que va a doler
 
@@ -197,16 +236,19 @@ Dicho ahora y no dentro de tres meses:
 
 - **Empiezas en cero.** El ahorro llega a los meses, no a la semana. Registra
   primero lo que ya os ha hecho perder tiempo, no intentes cubrir el proyecto
-  entero.
+  entero; `edgelore suggest` te dice por dónde.
 - **Un hecho obsoleto es peor que ninguno**, porque se lee con confianza. Por eso
-  cada hecho lleva `confidence` y el commit en que se verificó, y por eso existe
-  `edgelore stale`. La disciplina no es opcional.
+  cada hecho lleva `confidence` y una huella del contenido que describe, y por
+  eso existe `edgelore stale`. Pasado un año sin reverificar, las consultas dejan de
+  imprimir el sello a secas y añaden `<- sin reverificar desde hace N meses`: el
+  índice no puede saber si un hecho sigue siendo cierto, pero sí puede dejar de
+  aparentar que alguien lo ha comprobado hace poco. La disciplina no es opcional.
 - **Depende del equipo.** El hook ayuda, pero si nadie registra nada, no hay
   índice. Empieza con dos o tres personas y las conexiones que más escuecen.
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 119 pruebas).
+v0.1. El núcleo curado está completo y probado (`npm test`, 156 pruebas).
 
 Siguiente paso previsto: un extractor opcional basado en Roslyn que emita hechos
 en este mismo formato con `source: extractor:roslyn`, para poblar las aristas

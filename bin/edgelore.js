@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cmdQuery, cmdImpact, cmdFind, cmdPath, cmdStats, cmdKinds, cmdChecklist, cmdValidate, cmdStale, cmdPrune } from '../src/commands/read.js';
+import { cmdQuery, cmdImpact, cmdFind, cmdPath, cmdStats, cmdKinds, cmdChecklist, cmdValidate, cmdStale, cmdPrune, cmdRelocate, cmdSuggest } from '../src/commands/read.js';
 import { cmdAdd, cmdLink, cmdVerify, cmdRemove, cmdRename } from '../src/commands/write.js';
 import { cmdInit, cmdUninstall, cmdRules, availableRuleSets } from '../src/commands/init.js';
 import { cmdHook } from '../src/commands/hook.js';
@@ -19,7 +19,7 @@ import { EDGE_TYPES, CONFIDENCE } from '../src/model.js';
 const VERSION = '0.1.0';
 
 /** Banderas que aceptan valor; el resto son booleanas. Repetibles marcadas aparte. */
-const VALUE_FLAGS = new Set(['file', 'kind', 'summary', 'lang', 'note', 'trigger', 'at', 'confidence', 'dir', 'limit', 'depth', 'module']);
+const VALUE_FLAGS = new Set(['file', 'kind', 'summary', 'lang', 'note', 'trigger', 'at', 'confidence', 'dir', 'limit', 'depth', 'module', 'max-age', 'anchor', 'since']);
 const LIST_FLAGS = new Set(['edge', 'tag', 'rules']);
 
 export function parseArgs(argv) {
@@ -50,7 +50,7 @@ export function parseArgs(argv) {
       // `--rules a,b` y `--rules a --rules b` son equivalentes.
       options[name].push(...String(value).split(',').map((part) => part.trim()).filter(Boolean));
     } else if (VALUE_FLAGS.has(name)) {
-      options[name] = name === 'limit' || name === 'depth' ? Number(value) : value;
+      options[name] = name === 'limit' || name === 'depth' || name === 'max-age' || name === 'since' ? Number(value) : value;
     } else {
       options[name] = true;
     }
@@ -68,12 +68,14 @@ const COMMANDS = {
   impact: { run: cmdImpact, help: 'Que depende de esto. --files da la lista de sitios que revisar.' },
   find: { run: cmdFind, help: 'Busca hechos por texto.' },
   path: { run: cmdPath, help: 'Camino mas corto conocido entre dos nodos.' },
-  verify: { run: cmdVerify, help: 'Sella un hecho como comprobado en el commit actual.' },
+  verify: { run: cmdVerify, help: 'Sella un hecho como comprobado con el contenido actual.' },
   rename: { run: cmdRename, help: 'Cambia el id de un nodo y reapunta todo lo que le referenciaba.' },
   remove: { run: cmdRemove, help: 'Elimina un hecho.' },
   validate: { run: cmdValidate, help: 'Comprueba la coherencia del indice. Pensado para CI.' },
+  relocate: { run: cmdRelocate, help: 'Reajusta las lineas de las referencias que se han desplazado.' },
   prune: { run: cmdPrune, help: 'Lista (o con --apply borra) los hechos cuyo fichero ya no existe.' },
   stale: { run: cmdStale, help: 'Lista los hechos cuyo codigo cambio despues de verificarlos.' },
+  suggest: { run: cmdSuggest, help: 'Por donde empezar a rellenar el indice y que hechos revisar.' },
   stats: { run: cmdStats, help: 'Cobertura del indice.' },
   kinds: { run: cmdKinds, help: 'Tipos de nodo declarados por las reglas activas.' },
   checklist: { run: cmdChecklist, help: 'Comprobaciones manuales asociadas a un kind.' },
@@ -104,13 +106,17 @@ OPCIONES COMUNES
   --json          Salida en JSON para herramientas.
   --brief         Omite las notas largas en query.
   --strict        En validate, la desincronizacion con el codigo tambien rompe.
-  --apply         En prune, borra de verdad. Sin el, solo lista.
+  --apply         En prune y relocate, actua de verdad. Sin el, solo lista.
   --unverified    Al escribir, no sella el hecho como verificado.
   --confidence X  certain, likely o unverified.
   --all           En query/impact, lista todas las dependencias sin recortar.
   --limit N       Cuantas listar por nivel antes de resumir (por defecto 12).
   --files         En impact, la lista de trabajo: ficheros concretos a revisar.
   --module P      Limita a los ids que empiecen por ese prefijo de modulo.
+  --since N       En suggest, ventana de dias para medir la rotacion (90).
+  --max-age N     Dias tras los que un hecho verificado se marca como no
+                  reverificado (por defecto 365). En validate, ademas lista
+                  los que lo superan; con --strict, rompe.
 
 CONFIANZA POR DEFECTO
   edgelore link         certain      es una afirmacion deliberada sobre una relacion
@@ -121,7 +127,7 @@ EJEMPLOS
   edgelore init                                    # detecta el stack solo
   edgelore add Erp.Ventas.PagoService --file src/Ventas/PagoService.cs --kind service
   edgelore link AppShell Erp.Ui.DetallePage string-ref --at AppShell.xaml.cs:42 \\
-    --note 'registrada como ruta "detalle"'
+    --note 'registrada como ruta "detalle"'      # el ancla se captura sola
   edgelore impact Erp.Ui.DetallePage.OnAppearing            # orientarse: cuanto alcanza
   edgelore impact Base.PageBase.OnAppearing --files --depth 1   # que ficheros revisar
   edgelore impact Base.PageBase.OnAppearing --files --module Erp.Ventas

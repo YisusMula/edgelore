@@ -84,8 +84,26 @@ ciego:
 | Que pasa si cambio esta clave de configuracion | **edgelore** |
 
 Trata cada hecho segun su etiqueta de confianza. `~SIN VERIFICAR` y `~probable`
-son pistas que hay que comprobar, no verdades. Si `edgelore stale` marca un hecho, el
-codigo cambio despues de verificarlo: leelo antes de fiarte.
+son pistas que hay que comprobar, no verdades. Si `edgelore stale` marca un
+hecho, el contenido del fichero ya no casa con la huella que se guardo al
+verificarlo: leelo antes de fiarte.
+
+Hay dos marcas mas que significan lo mismo -este hecho puede estar mintiendo-:
+
+- `<- sin reverificar desde hace N meses` en la linea `verificado:`. El hecho se
+  comprobo, pero hace mucho. Cuanto mas viejo, mas barato sale confirmarlo
+  leyendo el codigo antes de construir nada encima.
+- `SIN VERIFICAR: nadie ha confirmado este hecho todavia` cuando el nodo no
+  tiene sello. Alguien lo escribio y nadie lo ha comprobado nunca.
+
+`impact` te dice en una linea cuantos de los dependientes alcanzados estan en
+ese estado, contados por nodo y no por arista. Si vas a apoyar un cambio en uno
+de ellos, abrelo y confirmalo, y sella lo que confirmes con `edgelore verify
+<id>`: es lo que evita que la proxima persona pague la misma comprobacion.
+
+Cuando un texto salga cortado con `[...+N caracteres]`, la salida esta acotada a
+proposito. Si de verdad necesitas el resto, `edgelore query <id> --all`; casi
+nunca hace falta.
 
 ## Despues de descubrir: registra
 
@@ -121,6 +139,10 @@ deja de servir muy rapido.
 edgelore rename Erp.Ui.ViejaPage Erp.Ui.NuevaPage
 ```
 
+Si te piden por donde empezar a rellenar el indice, o que hay que revisar,
+`edgelore suggest` lo responde: lo mas tocado sin ningun hecho, y los hechos con
+mas dependientes que nadie confirma desde hace tiempo.
+
 `edgelore kinds` lista los tipos de nodo que conocen las reglas activas.
 `edgelore checklist <kind>` te dice que comprobar para ese tipo: usalo cuando
 registres un nodo nuevo, porque son justo las preguntas cuya respuesta se pierde.
@@ -132,7 +154,9 @@ Registra lo que **no se deduce leyendo el fichero**:
 - `lifecycle` — lo invoca el runtime: `OnAppearing`, `OnStart`, un ctor por DI.
   Siempre con `--trigger`: sin el, dentro de seis meses nadie sabra interpretarlo.
 - `string-ref` — rutas, reflexion, DI por nombre, procedimientos invocados por
-  cadena. Siempre con `--at` apuntando al literal.
+  cadena. Siempre con `--at` apuntando al literal: ademas de decir donde mirar,
+  guarda sola el texto de esa linea, y eso permite que `edgelore relocate`
+  reajuste la referencia cuando el fichero crece por arriba.
 - `event` — quien publica y quien consume.
 - `config` — que codigo depende de que clave.
 - `writes` / `reads` — sobre todo escrituras en tablas compartidas.

@@ -10,6 +10,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   loadIndex,
+  readNode,
+  writeNode,
   requireStoreRoot,
   danglingIds,
   classifyDangling,
@@ -30,9 +32,24 @@ import {
   workList,
   renderWorkList,
   didYouMean,
+  decayLabel,
+  ageInDays,
+  formatAge,
+  DEFAULT_MAX_AGE_DAYS,
 } from '../query.js';
 import { loadRules, kindCatalog, renderKinds, checklistFor, renderChecklist } from '../rules.js';
-import { changedSince, filesChangedSince, isGitRepo, lastCommitFor } from '../git.js';
+import { changedSince, filesChangedSince, isGitRepo, lastCommitFor, churn } from '../git.js';
+import { fingerprintFile } from '../fingerprint.js';
+import { checkAnchor, withLine } from '../anchor.js';
+
+/**
+ * Umbral de reverificacion en dias. Sin --max-age vale el de por defecto, que
+ * es lo que hace que el desgaste se vea sin tener que pedirlo.
+ */
+function maxAgeFrom(options) {
+  const value = Number(options['max-age']);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_MAX_AGE_DAYS;
+}
 
 export function cmdQuery(args, options) {
   const id = args[0];
@@ -53,7 +70,13 @@ export function cmdQuery(args, options) {
   }
 
   if (options.json) return { output: JSON.stringify(result, null, 2) };
-  return { output: renderNeighbourhood(result, { notes: !options.brief, limit: options.all ? 0 : options.limit }) };
+  return {
+    output: renderNeighbourhood(result, {
+      notes: !options.brief,
+      limit: options.all ? 0 : options.limit,
+      maxAgeDays: maxAgeFrom(options),
+    }),
+  };
 }
 
 /**
@@ -65,7 +88,8 @@ export function cmdQuery(args, options) {
 export function cmdImpact(args, options) {
   const id = args[0];
   if (!id) throw new Error('Uso: edgelore impact <id> [--depth N] [--files] [--module <prefijo>]');
-  const index = loadIndex(requireStoreRoot());
+  const root = requireStoreRoot();
+  const index = loadIndex(root);
   const depth = Number.isFinite(options.depth) && options.depth > 0 ? options.depth : 4;
   const result = impact(index, id, { maxDepth: depth });
 
@@ -86,7 +110,12 @@ export function cmdImpact(args, options) {
     const lista = workList(result, { module: options.module });
     return { output: renderWorkList(result, lista, { module: options.module }) };
   }
-  return { output: renderImpact(result, index, { limit: options.all ? 0 : options.limit }) };
+  return {
+    output: renderImpact(result, index, {
+      limit: options.all ? 0 : options.limit,
+      maxAgeDays: maxAgeFrom(options),
+    }),
+  };
 }
 
 export function cmdFind(args, options) {
@@ -177,6 +206,37 @@ export function cmdValidate(args, options) {
     }
   }
 
+  // Tercera categoria, y solo bajo peticion explicita: hechos que nadie
+  // reverifica desde hace demasiado. No entra en la salida por defecto a
+  // proposito. El desgaste por antiguedad es continuo y universal -todo hecho
+  // envejece-, asi que informar de el sin que nadie lo haya pedido converge en
+  // una lista que crece cada dia y que se acaba ignorando, arrastrando consigo
+  // la atencion sobre las dos categorias que si son accionables.
+  const caducados = [];
+  if (options['max-age'] !== undefined) {
+    const maxAgeDays = maxAgeFrom(options);
+    for (const node of index.nodes.values()) {
+      if (!node.verified?.date) continue;
+      const days = ageInDays(node.verified.date);
+      if (days !== null && days >= maxAgeDays) caducados.push({ id: node.id, days });
+    }
+    caducados.sort((a, b) => b.days - a.days || a.id.localeCompare(b.id));
+  }
+
+  // Cuarta categoria, tambien informativa: referencias `fichero:linea` cuyo
+  // ancla ya no casa. El desplazamiento es cosmetico y lo arregla `relocate`;
+  // que el texto haya desaparecido del fichero si es una referencia rota.
+  const desplazadas = [];
+  const rotas = [];
+  const cacheFuentes = new Map();
+  for (const node of index.nodes.values()) {
+    for (const edge of node.edges ?? []) {
+      const resultado = checkAnchor(root, edge, cacheFuentes);
+      if (resultado.estado === 'movida') desplazadas.push(node.id);
+      else if (resultado.estado === 'perdida') rotas.push({ id: node.id, to: edge.to, at: edge.at });
+    }
+  }
+
   const { esperados, sospechosos } = classifyDangling(index);
   const lines = [];
 
@@ -202,6 +262,27 @@ export function cmdValidate(args, options) {
     lines.push('  Suelen ser restos de un renombrado hecho sin `edgelore rename`.');
   }
 
+  if (rotas.length) {
+    if (lines.length) lines.push('');
+    lines.push(`${rotas.length} referencia(s) cuyo texto ya no aparece donde apuntan:`);
+    rotas.slice(0, 15).forEach((entry) => lines.push(`  ${entry.id} -> ${entry.to}  ${entry.at}`));
+    if (rotas.length > 15) lines.push(`  ... y ${rotas.length - 15} mas`);
+    lines.push('  Revisalas: el literal se movio de fichero o dejo de existir.');
+  }
+
+  if (desplazadas.length) {
+    if (lines.length) lines.push('');
+    lines.push(`${desplazadas.length} referencia(s) solo desplazadas de linea. Arreglalas con: edgelore relocate --apply`);
+  }
+
+  if (caducados.length) {
+    if (lines.length) lines.push('');
+    lines.push(`${caducados.length} hecho(s) sin reverificar desde hace mas de ${maxAgeFrom(options)} dias:`);
+    caducados.slice(0, 15).forEach((entry) => lines.push(`  ${entry.id}  (${formatAge(entry.days)})`));
+    if (caducados.length > 15) lines.push(`  ... y ${caducados.length - 15} mas`);
+    lines.push('  Confirmalos con: edgelore verify <id>');
+  }
+
   if (!lines.length) {
     lines.push(`Indice coherente: ${index.nodes.size} nodo(s), sin problemas.`);
   }
@@ -211,7 +292,8 @@ export function cmdValidate(args, options) {
 
   // Solo el esquema rompe el build por defecto.
   const failed = errores.length > 0
-    || (options.strict && (desincronizados.length > 0 || sospechosos.length > 0));
+    || (options.strict
+      && (desincronizados.length > 0 || sospechosos.length > 0 || caducados.length > 0 || rotas.length > 0));
   return { output: lines.join('\n'), code: failed ? 1 : 0 };
 }
 
@@ -268,20 +350,44 @@ export function cmdPrune(args, options) {
  */
 export function cmdStale(args, options) {
   const root = requireStoreRoot();
-  if (!isGitRepo(root)) {
-    return { output: 'Este directorio no es un repositorio git; no se puede calcular la caducidad.', code: 1 };
-  }
   const index = loadIndex(root);
+  const git = isGitRepo(root);
   const stale = [];
   const unverified = [];
 
-  // Se agrupan los hechos por el commit en que se verificaron y se pregunta a
-  // git una vez por commit, no una por hecho: con miles de hechos la diferencia
-  // es de segundos a milisegundos, y esto corre en CI.
+  // La huella del contenido es el mecanismo; git solo enriquece.
+  //
+  // Antes era al reves y eso abria dos agujeros. Fuera de un repositorio git el
+  // comando se negaba a funcionar entero. Y dentro, `filesChangedSince`
+  // devuelve null cuando git no reconoce el commit del sello -lo que pasa en
+  // cuanto alguien hace squash al mergear-, y ese null se interpretaba como
+  // "ante la duda no marcar nada": los hechos verificados dejaban de
+  // comprobarse EN SILENCIO y `stale` respondia "todos al dia" porque no podia
+  // preguntar, no porque lo estuvieran.
   const porCommit = new Map();
   for (const node of index.nodes.values()) {
     if (!node.file) continue;
-    if (!node.verified?.commit) {
+    if (!node.verified?.date) {
+      unverified.push(node);
+      continue;
+    }
+    if (node.verified.fingerprint) {
+      const actual = fingerprintFile(root, node.file);
+      // null = el fichero ya no existe. Eso no es caducidad, es
+      // desincronizacion, y de eso ya informan `validate` y `prune`.
+      if (actual && actual !== node.verified.fingerprint) {
+        stale.push({
+          id: node.id,
+          file: node.file,
+          since: node.verified.commit ?? node.verified.date,
+          last: git ? lastCommitFor(root, node.file) : null,
+        });
+      }
+      continue;
+    }
+    // Hecho antiguo, sellado antes de que existieran las huellas: se cae al
+    // mecanismo de git, que es el unico dato que tiene.
+    if (!node.verified.commit || !git) {
       unverified.push(node);
       continue;
     }
@@ -289,10 +395,10 @@ export function cmdStale(args, options) {
     porCommit.get(node.verified.commit).push(node);
   }
 
+  // Se pregunta a git una vez por commit y no una por hecho: con miles de
+  // hechos la diferencia es de segundos a milisegundos, y esto corre en CI.
   for (const [commit, nodes] of porCommit) {
     const cambiados = filesChangedSince(root, commit);
-    // null = git no pudo responder (commit desconocido tras un rebase, por
-    // ejemplo). Ante la duda no se marca nada, como hacia changedSince.
     if (!cambiados) continue;
     for (const node of nodes) {
       if (!cambiados.has(node.file)) continue;
@@ -306,7 +412,7 @@ export function cmdStale(args, options) {
   const lines = [];
   if (stale.length) {
     lines.push(`${stale.length} hecho(s) por revisar (el codigo cambio despues de verificarlos):`);
-    stale.forEach((entry) => lines.push(`  ${entry.id}\n    ${entry.file}  ${entry.since} -> ${entry.last}`));
+    stale.forEach((entry) => lines.push(`  ${entry.id}\n    ${entry.file}  ${entry.since}${entry.last ? ` -> ${entry.last}` : ''}`));
     lines.push('', 'Revisalo y confirma con: edgelore verify <id>');
   }
   if (unverified.length) {
@@ -316,4 +422,232 @@ export function cmdStale(args, options) {
   }
   if (!lines.length) lines.push('Todos los hechos verificados siguen al dia.');
   return { output: lines.join('\n'), code: stale.length ? 1 : 0 };
+}
+
+/**
+ * Recorre las aristas con ancla y reajusta las que se han desplazado.
+ *
+ * Sin esto, `at: src/A.cs:42` envejece mal por el motivo mas tonto posible:
+ * alguien anade una linea arriba. Ese desplazamiento es constante y no
+ * significa nada, asi que si contara como caducidad el aviso seria ruido
+ * continuo; en cambio, que el ancla desaparezca del fichero si significa algo.
+ *
+ * Por defecto solo informa. `--apply` reescribe las lineas, que es una
+ * operacion segura -no cambia ningun hecho, solo corrige donde mirar- pero que
+ * toca ficheros del indice y merece ser deliberada.
+ */
+export function cmdRelocate(args, options) {
+  const root = requireStoreRoot();
+  const index = loadIndex(root);
+  const movidas = [];
+  const perdidas = [];
+  const ambiguas = [];
+  const cacheFuentes = new Map();
+
+  for (const node of index.nodes.values()) {
+    for (const edge of node.edges ?? []) {
+      const resultado = checkAnchor(root, edge, cacheFuentes);
+      if (resultado.estado === 'movida') {
+        const entrada = { id: node.id, to: edge.to, type: edge.type, at: edge.at, line: resultado.line };
+        movidas.push(entrada);
+        if (resultado.ambigua) ambiguas.push(entrada);
+      } else if (resultado.estado === 'perdida') {
+        perdidas.push({ id: node.id, to: edge.to, type: edge.type, at: edge.at, anchor: edge.anchor });
+      }
+    }
+  }
+
+  if (options.json) return { output: JSON.stringify({ movidas, perdidas }, null, 2) };
+
+  const lines = [];
+
+  if (movidas.length && options.apply) {
+    // Se agrupa por nodo para escribir cada fichero una sola vez.
+    const porNodo = new Map();
+    for (const entrada of movidas) {
+      if (!porNodo.has(entrada.id)) porNodo.set(entrada.id, []);
+      porNodo.get(entrada.id).push(entrada);
+    }
+    for (const [id, entradas] of porNodo) {
+      const existing = readNode(root, id);
+      if (!existing) continue;
+      const node = { ...existing };
+      const notes = node.notes ?? '';
+      delete node.notes;
+      delete node._file;
+      node.edges = (node.edges ?? []).map((edge) => {
+        const entrada = entradas.find((e) => e.to === edge.to && e.type === edge.type);
+        return entrada ? { ...edge, at: withLine(edge.at, entrada.line) } : edge;
+      });
+      writeNode(root, node, notes);
+    }
+    lines.push(`${movidas.length} referencia(s) reajustadas:`);
+    movidas.slice(0, 15).forEach((e) => lines.push(`  ${e.id} -> ${e.to}  ${e.at} => ${withLine(e.at, e.line)}`));
+    if (movidas.length > 15) lines.push(`  ... y ${movidas.length - 15} mas`);
+  } else if (movidas.length) {
+    lines.push(`${movidas.length} referencia(s) se han desplazado:`);
+    movidas.slice(0, 15).forEach((e) => lines.push(`  ${e.id} -> ${e.to}  ${e.at} => ${withLine(e.at, e.line)}`));
+    if (movidas.length > 15) lines.push(`  ... y ${movidas.length - 15} mas`);
+    lines.push('  Reajustalas con: edgelore relocate --apply');
+  }
+
+  if (ambiguas.length) {
+    if (lines.length) lines.push('');
+    lines.push(`${ambiguas.length} de ellas tenian varias lineas identicas; se eligio la mas cercana a la original.`);
+  }
+
+  if (perdidas.length) {
+    if (lines.length) lines.push('');
+    lines.push(`${perdidas.length} referencia(s) cuyo texto ya no aparece en el fichero:`);
+    perdidas.slice(0, 15).forEach((e) => lines.push(`  ${e.id} -> ${e.to}  ${e.at}\n      buscaba: ${e.anchor}`));
+    if (perdidas.length > 15) lines.push(`  ... y ${perdidas.length - 15} mas`);
+    lines.push('  Estas si estan caducadas de verdad: revisalas y corrige el `at`.');
+  }
+
+  if (!lines.length) {
+    const conAncla = [...index.nodes.values()].reduce(
+      (total, node) => total + (node.edges ?? []).filter((edge) => edge.anchor).length,
+      0,
+    );
+    lines.push(
+      conAncla
+        ? `${conAncla} referencia(s) con ancla, todas apuntando a la linea correcta.`
+        : 'Ninguna arista tiene ancla todavia. Se capturan solas al usar `edgelore link --at`.',
+    );
+  }
+
+  return { output: lines.join('\n'), code: perdidas.length ? 1 : 0 };
+}
+
+/**
+ * Por donde empezar y que se esta pudriendo.
+ *
+ * "Registra primero lo que ya os ha hecho perder tiempo" es buen consejo sin
+ * herramienta detras, y el mayor obstaculo declarado de Edgelore es empezar en
+ * cero. Este comando convierte la adopcion en una lista de trabajo usando
+ * senales que ya existen, sin parsear nada ni adivinar el lenguaje.
+ *
+ * Son DOS preguntas distintas y por eso salen en dos bloques:
+ *
+ *   - Que falta por cubrir: ficheros que el equipo toca mucho y no estan en el
+ *     indice. Es donde el conocimiento se vuelve a aprender cada vez.
+ *   - Que hay que revisar: hechos de los que depende mucha gente y que nadie
+ *     confirma desde hace tiempo. Un hecho con mucho fan-in que miente hace
+ *     mas dano que veinte hechos hoja obsoletos.
+ */
+const SUGGEST_LIMIT = 10;
+
+/**
+ * Lo que nunca merece un hecho, por mucho que se toque.
+ *
+ * No es adivinar el lenguaje -eso romperia la promesa de ser agnostico-, es
+ * descartar dos FORMATOS que se comportan igual en cualquier stack:
+ *
+ *   - documentacion en texto plano: no se ejecuta, asi que no puede tener
+ *     ninguna de las relaciones ocultas que Edgelore existe para registrar.
+ *   - ficheros de bloqueo de dependencias: cambian constantemente y los genera
+ *     una herramienta, de modo que encabezan cualquier ranking de rotacion sin
+ *     que nadie haya aprendido nada al tocarlos.
+ *
+ * La configuracion (.json, .yaml, .xml) NO se descarta: ahi viven las claves de
+ * las que depende el codigo, que son justo aristas `config`.
+ *
+ * `--all` lo desactiva, por si en algun repositorio esto estorba.
+ */
+const DOC_EXT = /\.(md|markdown|txt|rst|adoc)$/i;
+const LOCKFILE = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Gemfile\.lock|poetry\.lock|Cargo\.lock|packages\.lock\.json)$/i;
+
+export function sinInteresParaIndice(file) {
+  return DOC_EXT.test(file) || LOCKFILE.test(file);
+}
+
+/**
+ * commits x personas, no solo commits. Un fichero que toca una sola persona
+ * cincuenta veces es su area; uno que tocan seis personas veinte veces es
+ * conocimiento compartido que se re-aprende cada vez, y ahi es donde un indice
+ * paga. Es una heuristica, y la salida dice que lo es.
+ */
+export function ordenarPorRotacion(entradas) {
+  return entradas.sort(
+    (a, b) => b.commits * b.authors - a.commits * a.authors || b.commits - a.commits || a.file.localeCompare(b.file),
+  );
+}
+
+export function cmdSuggest(args, options) {
+  const root = requireStoreRoot();
+  const index = loadIndex(root);
+  const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : SUGGEST_LIMIT;
+  const sinceDays = Number.isFinite(options.since) && options.since > 0 ? options.since : 90;
+  const maxAgeDays = maxAgeFrom(options);
+
+  // --- que falta por cubrir -------------------------------------------------
+  const cubiertos = new Set();
+  for (const node of index.nodes.values()) if (node.file) cubiertos.add(node.file);
+
+  const rotacion = churn(root, { sinceDays });
+  const sinCubrir = [];
+  if (rotacion) {
+    for (const [file, datos] of rotacion) {
+      if (cubiertos.has(file) || file.startsWith('.edgelore/')) continue;
+      if (!options.all && sinInteresParaIndice(file)) continue;
+      // Un fichero borrado durante la ventana sigue apareciendo en el log, pero
+      // no hay nada que registrar sobre el.
+      if (!fs.existsSync(path.join(root, file))) continue;
+      sinCubrir.push({ file, commits: datos.commits, authors: datos.authors.size });
+    }
+    ordenarPorRotacion(sinCubrir);
+  }
+
+  // --- que hay que revisar --------------------------------------------------
+  const podridos = [];
+  for (const node of index.nodes.values()) {
+    const fanIn = (index.incoming.get(node.id) ?? []).length;
+    if (!fanIn) continue;
+    const motivo = !node.verified?.date
+      ? 'sin verificar nunca'
+      : decayLabel(node.verified, { maxAgeDays }) ?? null;
+    if (!motivo) continue;
+    podridos.push({ id: node.id, fanIn, motivo });
+  }
+  podridos.sort((a, b) => b.fanIn - a.fanIn || a.id.localeCompare(b.id));
+
+  if (options.json) {
+    return { output: JSON.stringify({ sinCubrir: sinCubrir.slice(0, limit), podridos: podridos.slice(0, limit) }, null, 2) };
+  }
+
+  const lines = [];
+
+  lines.push(`POR CUBRIR - lo mas tocado en los ultimos ${sinceDays} dias sin ningun hecho:`);
+  if (!rotacion) {
+    lines.push('  (hace falta git para saber que se toca mas; sin el no hay senal que ordenar)');
+  } else if (!sinCubrir.length) {
+    lines.push('  Nada: todo lo que se ha tocado ultimamente ya tiene algun hecho.');
+  } else {
+    const ancho = String(sinCubrir[0].commits).length;
+    for (const entry of sinCubrir.slice(0, limit)) {
+      const commits = `${entry.commits} commit${entry.commits === 1 ? '' : 's'}`;
+      const personas = `${entry.authors} persona${entry.authors === 1 ? '' : 's'}`;
+      lines.push(`  ${commits.padStart(ancho + 8)}  ${personas.padEnd(11)} ${entry.file}`);
+    }
+    lines.push('');
+    lines.push('  Es una heuristica: mucho movimiento y varias manos suele significar');
+    lines.push('  conocimiento que se re-aprende cada vez. Mira la lista y elige tu.');
+    if (!options.all) lines.push('  (se omiten documentacion y ficheros de bloqueo; --all los incluye)');
+    lines.push(`  Registra uno con: edgelore add <Id> --file ${sinCubrir[0].file} --kind <kind>`);
+  }
+
+  lines.push('');
+  lines.push('POR REVISAR - hechos de los que depende mas gente y nadie confirma:');
+  if (!podridos.length) {
+    lines.push('  Nada: los hechos con dependientes estan verificados y al dia.');
+  } else {
+    for (const entry of podridos.slice(0, limit)) {
+      lines.push(`  ${String(entry.fanIn).padStart(3)} dependientes  ${entry.id}  (${entry.motivo})`);
+    }
+    lines.push('');
+    lines.push('  Un hecho con mucho fan-in que miente hace mas dano que veinte hojas obsoletas.');
+    lines.push(`  Confirmalos con: edgelore verify ${podridos[0].id}`);
+  }
+
+  return { output: lines.join('\n') };
 }

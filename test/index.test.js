@@ -5,13 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { loadIndex, writeNode, readNode, findStoreRoot, incomingEdges, danglingIds, classifyDangling } from '../src/store.js';
-import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact, moduleOf, workList, renderWorkList, didYouMean, suggest } from '../src/query.js';
+import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact, moduleOf, workList, renderWorkList, didYouMean, suggest, clamp, ageInDays, formatAge, decayLabel } from '../src/query.js';
 import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
+import { fingerprintOf, normalizeContent, fingerprintFile } from '../src/fingerprint.js';
+import { parseAt, normalizeAnchor, captureAnchor, checkAnchor } from '../src/anchor.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
-import { parseEdgeFlag, cmdAdd, cmdLink, cmdRename } from '../src/commands/write.js';
+import { parseEdgeFlag, cmdAdd, cmdLink, cmdRename, cmdVerify } from '../src/commands/write.js';
 import { cmdInit, cmdUninstall, cmdRules, detectRuleSets } from '../src/commands/init.js';
-import { cmdValidate, cmdPrune } from '../src/commands/read.js';
+import { cmdValidate, cmdPrune, cmdStale, cmdRelocate, cmdSuggest, ordenarPorRotacion, sinInteresParaIndice } from '../src/commands/read.js';
 import { parseArgs } from '../bin/edgelore.js';
 
 /** Repositorio temporal con Edgelore instalado, para pruebas aisladas. */
@@ -932,5 +934,457 @@ test('prune no dice nada cuando todo esta sincronizado', () => {
   inSandbox((root) => {
     writeNode(root, { id: 'SinFichero', edges: [] });
     assert.match(cmdPrune([], {}).output, /Ningun hecho apunta/);
+  });
+});
+
+// --- Texto libre acotado --------------------------------------------------
+//
+// `summary` lo acota validateNode a 300 caracteres, pero `note`, `trigger` y
+// sobre todo `notes` -el cuerpo entero del markdown- no los acotaba nada. Es la
+// unica via por la que una consulta podia devolver miles de tokens, y ademas es
+// texto que el hook previo a la edicion inyecta en el contexto sin pedir
+// permiso. El README prometia que ningun comando puede devolver miles de
+// lineas; estas pruebas hacen que sea verdad.
+
+test('clamp deja intacto lo que cabe y anota cuanto recorta', () => {
+  assert.equal(clamp('corto', 100), 'corto');
+  const largo = clamp('x'.repeat(500), 100);
+  assert.ok(largo.length < 160, `recorte de ${largo.length} caracteres`);
+  assert.match(largo, /\[\.\.\.\+\d+ caracteres\]/);
+});
+
+test('clamp no parte una palabra por la mitad si puede evitarlo', () => {
+  const texto = clamp(`${'palabra '.repeat(50)}`, 100);
+  assert.ok(!/pala\b/.test(texto.split(' [...')[0].split(' ').pop()));
+});
+
+test('query acota una nota de nodo desmesurada', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'A', edges: [{ to: 'B', type: 'calls' }] }, 'linea muy larga. '.repeat(2000));
+  const texto = renderNeighbourhood(neighbourhood(loadIndex(root), 'A'));
+  assert.ok(texto.length < 2500, `salida de ${texto.length} caracteres; deberia ir acotada`);
+  assert.match(texto, /--all para verlo entero/);
+});
+
+test('--all devuelve la nota entera', () => {
+  const root = sandbox();
+  const cuerpo = 'linea muy larga. '.repeat(2000);
+  writeNode(root, { id: 'A', edges: [{ to: 'B', type: 'calls' }] }, cuerpo);
+  const texto = renderNeighbourhood(neighbourhood(loadIndex(root), 'A'), { limit: 0 });
+  assert.ok(texto.length > 30000, 'con --all no se recorta nada');
+});
+
+test('query acota tambien el texto libre de una arista', () => {
+  const root = sandbox();
+  writeNode(root, {
+    id: 'A',
+    edges: [{ to: 'B', type: 'string-ref', at: 'src/A.cs:1', note: 'nota kilometrica. '.repeat(500) }],
+  });
+  const texto = renderNeighbourhood(neighbourhood(loadIndex(root), 'A'));
+  assert.ok(texto.length < 1500, `salida de ${texto.length} caracteres`);
+  assert.match(texto, /\[\.\.\.\+\d+ caracteres\]/);
+});
+
+test('impact acota el texto libre que inyecta el hook', () => {
+  const root = sandbox();
+  writeNode(root, {
+    id: 'Dep',
+    edges: [{ to: 'Hub', type: 'lifecycle', trigger: 'disparador larguisimo. '.repeat(500) }],
+  });
+  writeNode(root, { id: 'Hub', edges: [] });
+  const index = loadIndex(root);
+  const texto = renderImpact(impact(index, 'Hub'), index);
+  assert.ok(texto.length < 1800, `salida de ${texto.length} caracteres`);
+  assert.match(texto, /\[\.\.\.\+\d+ caracteres\]/);
+});
+
+// --- Decaimiento de la confianza ------------------------------------------
+//
+// Un `certain` sellado hace tres anos se lee con la misma seguridad que uno de
+// ayer, y esa es justo la forma en que un indice curado miente. No se puede
+// recalcular la verdad de un hecho sin mirarlo; lo unico honesto es dejar de
+// imprimir la etiqueta a secas. El dato ya estaba en verified.date.
+
+test('ageInDays y formatAge convierten un sello en algo legible', () => {
+  const ahora = Date.parse('2026-08-26T00:00:00Z');
+  assert.equal(ageInDays('2026-08-20', ahora), 6);
+  assert.equal(ageInDays('sin fecha', ahora), null);
+  assert.equal(ageInDays(undefined, ahora), null);
+  assert.match(formatAge(6), /hace 6 dias/);
+  assert.match(formatAge(700), /ano/);
+});
+
+test('decayLabel calla mientras el sello es reciente', () => {
+  const ahora = Date.parse('2026-08-26T00:00:00Z');
+  assert.equal(decayLabel({ date: '2026-06-01' }, { now: ahora }), null);
+  assert.equal(decayLabel({}, { now: ahora }), null, 'sin fecha no se inventa antiguedad');
+  assert.match(decayLabel({ date: '2023-02-01' }, { now: ahora }), /sin reverificar/);
+});
+
+test('query marca un hecho verificado hace demasiado', () => {
+  const root = sandbox();
+  writeNode(root, {
+    id: 'A',
+    edges: [{ to: 'B', type: 'calls', confidence: 'certain' }],
+    verified: { commit: 'abc1234', date: '2023-02-01' },
+  });
+  const texto = renderNeighbourhood(neighbourhood(loadIndex(root), 'A'), {
+    now: Date.parse('2026-08-26T00:00:00Z'),
+  });
+  assert.match(texto, /sin reverificar desde/);
+});
+
+test('query no marca nada cuando el sello es reciente', () => {
+  const root = sandbox();
+  writeNode(root, {
+    id: 'A',
+    edges: [{ to: 'B', type: 'calls' }],
+    verified: { commit: 'abc1234', date: '2026-08-01' },
+  });
+  const texto = renderNeighbourhood(neighbourhood(loadIndex(root), 'A'), {
+    now: Date.parse('2026-08-26T00:00:00Z'),
+  });
+  assert.ok(!texto.includes('sin reverificar'), texto);
+});
+
+test('query dice cuando un hecho no lo ha confirmado nadie', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'A', edges: [{ to: 'B', type: 'calls' }] });
+  const texto = renderNeighbourhood(neighbourhood(loadIndex(root), 'A'));
+  assert.match(texto, /SIN VERIFICAR: nadie ha confirmado/);
+});
+
+test('impact resume cuantos dependientes estan sin reverificar', () => {
+  const root = sandbox();
+  writeNode(root, {
+    id: 'Viejo',
+    edges: [{ to: 'Hub', type: 'calls' }],
+    verified: { commit: 'aaa1111', date: '2023-02-01' },
+  });
+  writeNode(root, { id: 'Nunca', edges: [{ to: 'Hub', type: 'calls' }] });
+  writeNode(root, { id: 'Hub', edges: [] });
+  const index = loadIndex(root);
+  const texto = renderImpact(impact(index, 'Hub'), index, { now: Date.parse('2026-08-26T00:00:00Z') });
+  assert.match(texto, /1 sin reverificar desde hace mas de 12 meses/);
+  assert.match(texto, /1 sin verificar nunca/);
+});
+
+test('el recuento de decaidos cuenta nodos, no aristas', () => {
+  // El mismo dependiente llega por dos motivos distintos y los dos se listan
+  // -son dos formas de romperlo- pero es un unico sitio que abrir. Contando
+  // aristas, el aviso decia 2 donde hay 1, justo en la linea que manda a
+  // comprobarlos.
+  const root = sandbox();
+  writeNode(root, {
+    id: 'Erp.Ventas.Pagina',
+    edges: [
+      { to: 'Hub', type: 'implements' },
+      { to: 'Hub', type: 'reads' },
+    ],
+  });
+  writeNode(root, { id: 'Hub', edges: [] });
+  const index = loadIndex(root);
+  const result = impact(index, 'Hub');
+  assert.equal(result.levels[0].entries.length, 2, 'las dos aristas se siguen listando');
+  const texto = renderImpact(result, index);
+  assert.match(texto, /Del dependiente alcanzado, 1 sin verificar nunca\. Comprobalo /, texto);
+  assert.ok(!texto.includes('2 sin verificar nunca'), texto);
+});
+
+test('el recuento de decaidos habla de alcanzados, tambien con la lista recortada', () => {
+  // Cuando un nivel se reparte por modulo no se imprime ni un nombre, asi que
+  // "de los dependientes listados" prometia una lista que no estaba ahi.
+  const root = sandbox();
+  for (let i = 0; i < 4; i += 1) {
+    writeNode(root, { id: `Erp.Ventas.P${i}`, edges: [{ to: 'Hub', type: 'implements' }] });
+  }
+  writeNode(root, { id: 'Hub', edges: [] });
+  const index = loadIndex(root);
+  const texto = renderImpact(impact(index, 'Hub'), index, { limit: 2 });
+  assert.match(texto, /reparto por modulo/, texto);
+  assert.match(texto, /De los 4 dependientes alcanzados, 4 sin verificar nunca/, texto);
+  assert.ok(!texto.includes('dependientes listados'), texto);
+});
+
+test('validate calla sobre la antiguedad salvo que se le pida', () => {
+  // Misma regla que con la desincronizacion: todo hecho envejece, asi que una
+  // lista de caducados en la salida por defecto crece cada dia hasta que se
+  // ignora, y arrastra consigo la atencion sobre lo que si es accionable.
+  inSandbox((root) => {
+    writeNode(root, {
+      id: 'A',
+      edges: [{ to: 'B', type: 'calls' }],
+      verified: { commit: 'aaa1111', date: '2019-01-01' },
+    });
+    writeNode(root, { id: 'B', edges: [] });
+
+    const callado = cmdValidate([], {});
+    assert.ok(!callado.output.includes('sin reverificar'), callado.output);
+    assert.equal(callado.code, 0);
+
+    const pedido = cmdValidate([], { 'max-age': 365 });
+    assert.match(pedido.output, /1 hecho\(s\) sin reverificar desde hace mas de 365 dias/);
+    assert.equal(pedido.code, 0, 'informar no rompe el build');
+
+    assert.equal(cmdValidate([], { 'max-age': 365, strict: true }).code, 1, 'con --strict si rompe');
+  });
+});
+
+// --- Huella del contenido --------------------------------------------------
+//
+// El commit era el MECANISMO para detectar que un hecho se quedo atras, y era
+// un mal mecanismo: obligaba a git y se evaporaba al reescribir la historia.
+// Ahora el mecanismo es la huella del fichero y git solo enriquece.
+
+test('la huella ignora los finales de linea y el BOM', () => {
+  // Sin esto, un equipo mixto Windows/Linux veria TODOS los hechos caducados al
+  // cambiar de maquina: `core.autocrlf=true` materializa el arbol con CRLF.
+  const lf = fingerprintOf(normalizeContent(Buffer.from('a\nb\n', 'utf8')));
+  const crlf = fingerprintOf(normalizeContent(Buffer.from('a\r\nb\r\n', 'utf8')));
+  const bom = fingerprintOf(normalizeContent(Buffer.from('﻿a\nb\n', 'utf8')));
+  assert.equal(lf, crlf);
+  assert.equal(lf, bom);
+  assert.match(lf, /^sha256:[0-9a-f]{16}$/);
+});
+
+test('la huella si cambia cuando cambia el contenido', () => {
+  assert.notEqual(
+    fingerprintOf(normalizeContent(Buffer.from('a\n'))),
+    fingerprintOf(normalizeContent(Buffer.from('b\n'))),
+  );
+});
+
+test('verify sella con la huella en un repositorio sin git', () => {
+  // Antes salia con codigo 1 diciendo "esto no es un repositorio git", asi que
+  // fuera de git ningun hecho llevaba sello y `stale` no podia decir nada.
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'class A {}\n');
+    cmdAdd(['Erp.A'], { file: 'src/A.cs' });
+    const resultado = cmdVerify(['Erp.A']);
+    assert.equal(resultado.code ?? 0, 0, resultado.output);
+    const node = readNode(root, 'Erp.A');
+    assert.match(node.verified.fingerprint, /^sha256:[0-9a-f]{16}$/);
+    assert.equal(node.verified.commit, undefined, 'sin git no hay commit que anotar');
+  });
+});
+
+test('stale detecta el cambio por huella, sin preguntar a git', () => {
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'class A {}\n');
+    cmdAdd(['Erp.A'], { file: 'src/A.cs' });
+
+    assert.equal(cmdStale([], {}).code ?? 0, 0, 'recien sellado, nada que revisar');
+
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'class A { void Nuevo() {} }\n');
+    const resultado = cmdStale([], {});
+    assert.equal(resultado.code, 1);
+    assert.match(resultado.output, /Erp\.A/);
+  });
+});
+
+test('stale no confunde un fichero borrado con un hecho caducado', () => {
+  // Eso es desincronizacion, y de eso informan validate y prune.
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'class A {}\n');
+    cmdAdd(['Erp.A'], { file: 'src/A.cs' });
+    fs.rmSync(path.join(root, 'src', 'A.cs'));
+    assert.equal(cmdStale([], {}).code ?? 0, 0, cmdStale([], {}).output);
+  });
+});
+
+test('un hecho sellado solo con commit sigue siendo valido', () => {
+  // Compatibilidad: los indices escritos antes de que existieran las huellas no
+  // pueden quedar invalidados de golpe.
+  const problemas = validateNode({ id: 'A', verified: { commit: 'abc1234', date: '2026-01-01' } });
+  assert.deepEqual(problemas, []);
+});
+
+test('una huella con formato invalido si rompe el esquema', () => {
+  const problemas = validateNode({ id: 'A', verified: { fingerprint: 'sha1:cosas', date: '2026-01-01' } });
+  assert.equal(problemas.length, 1);
+  assert.match(problemas[0], /fingerprint invalida/);
+});
+
+test('las claves del sello salen siempre en el mismo orden', () => {
+  const verified = normalizeNode({
+    id: 'A',
+    verified: { date: '2026-01-01', by: 'a@b.c', commit: 'abc1234', fingerprint: 'sha256:0123456789abcdef' },
+  }).verified;
+  assert.deepEqual(Object.keys(verified), ['fingerprint', 'commit', 'date', 'by']);
+});
+
+// --- Anclas de contenido ---------------------------------------------------
+//
+// `at: src/A.cs:42` deja de ser cierto en cuanto alguien anade una linea
+// arriba, y `at` es el campo de las aristas string-ref, las de mas valor del
+// indice. Hasta ahora NADA comprobaba que la linea 42 fuera la correcta: no es
+// que se desincronizara, es que nunca se verifico.
+
+test('parseAt separa fichero y linea, y rechaza lo que no lo es', () => {
+  assert.deepEqual(parseAt('src/A.cs:42'), { file: 'src/A.cs', line: 42 });
+  assert.deepEqual(parseAt('C:/x/A.cs:7'), { file: 'C:/x/A.cs', line: 7 }, 'rutas de Windows');
+  assert.equal(parseAt('src/A.cs'), null);
+  assert.equal(parseAt('src/A.cs:0'), null);
+  assert.equal(parseAt(undefined), null);
+});
+
+test('el ancla ignora la reindentacion', () => {
+  // Reindentar un bloque es el cambio mas frecuente que no altera lo que la
+  // linea dice; si contara como cambio, el ancla seria inservible.
+  assert.equal(normalizeAnchor('    foo(  1 , 2 )  '), normalizeAnchor('foo( 1 , 2 )'));
+});
+
+test('link captura el ancla solo, sin que nadie la escriba', () => {
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'uno\ndos\nRegisterRoute("detalle")\ncuatro\n');
+    cmdLink(['AppShell', 'DetallePage', 'string-ref'], { at: 'src/A.cs:3' });
+    const edge = readNode(root, 'AppShell').edges[0];
+    assert.equal(edge.anchor, 'RegisterRoute("detalle")');
+  });
+});
+
+test('una linea en blanco no se guarda como ancla', () => {
+  // No ancla nada: se movera sola en cuanto alguien toque el fichero, y
+  // guardarla daria una falsa sensacion de control.
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'uno\n\ntres\n');
+    cmdLink(['A', 'B', 'string-ref'], { at: 'src/A.cs:2', note: 'algo' });
+    assert.equal(readNode(root, 'A').edges[0].anchor, undefined);
+  });
+});
+
+test('relocate reajusta una referencia desplazada', () => {
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'uno\ndos\nRegisterRoute("detalle")\n');
+    cmdLink(['AppShell', 'DetallePage', 'string-ref'], { at: 'src/A.cs:3' });
+
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'nueva\notra\nuno\ndos\nRegisterRoute("detalle")\n');
+    assert.match(cmdRelocate([], {}).output, /se han desplazado/);
+    assert.equal(readNode(root, 'AppShell').edges[0].at, 'src/A.cs:3', 'sin --apply no toca nada');
+
+    cmdRelocate([], { apply: true });
+    assert.equal(readNode(root, 'AppShell').edges[0].at, 'src/A.cs:5');
+    assert.match(cmdRelocate([], {}).output, /apuntando a la linea correcta/);
+  });
+});
+
+test('relocate distingue desplazada de perdida', () => {
+  // Es toda la gracia: el desplazamiento es constante y no significa nada; que
+  // el texto desaparezca del fichero si.
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'uno\nRegisterRoute("detalle")\n');
+    cmdLink(['AppShell', 'DetallePage', 'string-ref'], { at: 'src/A.cs:2' });
+
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'uno\notra cosa\n');
+    const resultado = cmdRelocate([], {});
+    assert.equal(resultado.code, 1);
+    assert.match(resultado.output, /ya no aparece en el fichero/);
+  });
+});
+
+test('con varias lineas identicas se elige la mas cercana a la original', () => {
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'x()\nrelleno\nrelleno\nrelleno\nx()\n');
+    cmdLink(['A', 'B', 'string-ref'], { at: 'src/A.cs:5' });
+    // Se inserta una linea al principio: la referencia pasa de la 5 a la 6, y
+    // la otra ocurrencia identica sigue arriba. Elegir la primera del fichero
+    // mandaria a mirar el sitio equivocado.
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'nueva\nx()\nrelleno\nrelleno\nrelleno\nx()\n');
+    cmdRelocate([], { apply: true });
+    assert.equal(readNode(root, 'A').edges[0].at, 'src/A.cs:6');
+  });
+});
+
+test('validate informa de las referencias rotas sin romper el build', () => {
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'RegisterRoute("detalle")\n');
+    cmdLink(['A', 'B', 'string-ref'], { at: 'src/A.cs:1' });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'otra cosa\n');
+
+    const resultado = cmdValidate([], {});
+    assert.equal(resultado.code, 0, 'informa, no rompe');
+    assert.match(resultado.output, /ya no aparece donde apuntan/);
+    assert.equal(cmdValidate([], { strict: true }).code, 1);
+  });
+});
+
+test('anchor sin at no tiene sentido y el esquema lo dice', () => {
+  const problemas = validateNode({ id: 'A', edges: [{ to: 'B', type: 'calls', anchor: 'algo' }] });
+  assert.equal(problemas.length, 1);
+  assert.match(problemas[0], /anchor sin at/);
+});
+
+// --- suggest ---------------------------------------------------------------
+//
+// "Registra primero lo que ya os ha hecho perder tiempo" era buen consejo sin
+// herramienta detras. Esto convierte la adopcion -el mayor obstaculo declarado-
+// en una lista de trabajo, con senales que ya existen y sin parsear nada.
+
+test('suggest ordena por commits x personas, no solo por commits', () => {
+  // Un fichero que toca una sola persona muchas veces es su area; uno que tocan
+  // varias es conocimiento compartido que se re-aprende cada vez, y ahi es
+  // donde un indice paga.
+  const orden = ordenarPorRotacion([
+    { file: 'solo.cs', commits: 20, authors: 1 },
+    { file: 'compartido.cs', commits: 12, authors: 4 },
+    { file: 'quieto.cs', commits: 2, authors: 2 },
+  ]);
+  assert.deepEqual(orden.map((e) => e.file), ['compartido.cs', 'solo.cs', 'quieto.cs']);
+});
+
+test('suggest no propone documentacion ni ficheros de bloqueo', () => {
+  // Un README no se ejecuta: no puede tener ninguna de las relaciones ocultas
+  // que Edgelore existe para registrar. Un lockfile lo genera una herramienta y
+  // encabezaria cualquier ranking de rotacion sin que nadie aprenda nada.
+  assert.equal(sinInteresParaIndice('README.md'), true);
+  assert.equal(sinInteresParaIndice('docs/guia.rst'), true);
+  assert.equal(sinInteresParaIndice('package-lock.json'), true);
+  assert.equal(sinInteresParaIndice('src/App/yarn.lock'), true);
+  assert.equal(sinInteresParaIndice('src/A.cs'), false);
+  assert.equal(sinInteresParaIndice('appsettings.json'), false, 'la configuracion si importa');
+});
+
+test('suggest saca los hechos con mas dependientes que nadie confirma', () => {
+  inSandbox((root) => {
+    writeNode(root, { id: 'Hoja', edges: [{ to: 'X', type: 'calls' }] });
+    writeNode(root, { id: 'Hub', edges: [] });
+    for (let i = 0; i < 4; i += 1) {
+      writeNode(root, { id: `Dep${i}`, edges: [{ to: 'Hub', type: 'calls' }] });
+    }
+    const salida = cmdSuggest([], {}).output;
+    assert.match(salida, /4 dependientes {2}Hub {2}\(sin verificar nunca\)/);
+    // Una hoja sin dependientes tambien esta sin verificar, pero revisarla
+    // primero no aporta nada: el orden es lo que hace util la lista.
+    assert.ok(!salida.includes('Hoja'), salida);
+  });
+});
+
+test('suggest calla sobre lo que ya esta verificado y al dia', () => {
+  inSandbox((root) => {
+    writeNode(root, {
+      id: 'Hub',
+      edges: [],
+      verified: { fingerprint: 'sha256:0123456789abcdef', date: new Date().toISOString().slice(0, 10) },
+    });
+    writeNode(root, { id: 'Dep', edges: [{ to: 'Hub', type: 'calls' }] });
+    assert.match(cmdSuggest([], {}).output, /estan verificados y al dia/);
+  });
+});
+
+test('suggest degrada sin git en vez de fallar', () => {
+  inSandbox((root) => {
+    writeNode(root, { id: 'A', edges: [] });
+    const salida = cmdSuggest([], {}).output;
+    assert.match(salida, /hace falta git/);
+    assert.match(salida, /POR REVISAR/, 'la otra mitad sale igual: solo necesita el indice');
   });
 });
