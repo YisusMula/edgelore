@@ -1,0 +1,50 @@
+# Reglas de servicios de Windows y tareas programadas.
+#
+# Aqui el disparador vive FUERA del repositorio: lo arranca el Service Control
+# Manager, el Programador de tareas o un temporizador. Ninguna cantidad de
+# analisis del codigo fuente puede descubrirlo, y por eso es justo lo que mas
+# valor tiene tener escrito.
+
+id: dotnet-winservice
+name: Servicios de Windows y tareas programadas
+
+kinds:
+  windows-service:
+    label: Servicio de Windows (ServiceBase / host con UseWindowsService)
+    implicit_edges:
+      - member: OnStart
+        type: lifecycle
+        trigger: >-
+          lo invoca el Service Control Manager de Windows al arrancar el
+          servicio; el disparador esta fuera del repositorio
+        confidence: certain
+      - member: OnStop
+        type: lifecycle
+        trigger: lo invoca el SCM al detener el servicio, con un timeout limitado
+        confidence: certain
+    checklist:
+      - "Con que nombre esta instalado el servicio? Sin ese dato nadie lo encuentra en la maquina."
+      - "Con que cuenta se ejecuta? Los permisos explican la mitad de los fallos en produccion."
+      - "De que arranque depende (automatico, retardado, manual)?"
+      - "Que escribe en el registro de eventos? Es donde habra que mirar cuando falle."
+      - "Que otros servicios o bases de datos necesita disponibles al arrancar?"
+
+  scheduled-job:
+    label: Trabajo periodico (temporizador, cron, Programador de tareas)
+    implicit_edges:
+      - member: Run
+        type: schedules
+        trigger: lo dispara un temporizador o el Programador de tareas, no una llamada del codigo
+        confidence: likely
+    checklist:
+      - "Cada cuanto se ejecuta EXACTAMENTE? Anotalo en el summary; es la pregunta que siempre se repite."
+      - "Que pasa si una ejecucion se solapa con la anterior? Hay bloqueo o se pisan?"
+      - "Que ocurre si falla: reintenta, alerta, o se pierde en silencio?"
+      - "Que datos toca? Anade aristas reads y writes: un job que escribe sin que nadie lo sepa es una bomba."
+
+  external-trigger:
+    label: Disparador externo al repositorio (webhook, cola, fichero depositado)
+    checklist:
+      - "Quien lo dispara y desde donde? Sistema externo, integracion, otro equipo?"
+      - "Que codigo entra por aqui? Arista lifecycle hacia el punto de entrada."
+      - "Esta documentado en algun sitio fuera de este repositorio? Enlazalo en las notas."

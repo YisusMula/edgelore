@@ -1,0 +1,6 @@
+node_modules/
+*.log
+.DS_Store
+
+# Edgelore: los hechos SI se versionan; los artefactos derivados no.
+.edgelore/cache/

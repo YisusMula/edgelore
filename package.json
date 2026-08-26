@@ -1,0 +1,45 @@
+{
+  "name": "edgelore",
+  "version": "0.1.0",
+  "description": "Indice curado e incremental de las referencias que el codigo no declara: lifecycle, literales, eventos y configuracion. Consultable por agentes de IA.",
+  "type": "module",
+  "bin": {
+    "edgelore": "bin/edgelore.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bin",
+    "src",
+    "templates",
+    "docs",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "knowledge-graph",
+    "code-index",
+    "claude-code",
+    "ai-agents",
+    "static-analysis",
+    "dotnet",
+    "maui",
+    "codebase-documentation"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YisusMula/edgelore.git"
+  },
+  "homepage": "https://github.com/YisusMula/edgelore#readme",
+  "bugs": {
+    "url": "https://github.com/YisusMula/edgelore/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "dependencies": {}
+}

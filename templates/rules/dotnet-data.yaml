@@ -1,0 +1,45 @@
+# Reglas de datos: Entity Framework, SQL y procedimientos almacenados.
+#
+# En un ERP la mayoria de sorpresas no estan en el codigo C# sino en el salto al
+# almacen: un trigger de base de datos, un procedimiento que escribe en tres
+# tablas, una vista que alguien cambio. Nada de eso lo ve un parser de C#.
+
+id: dotnet-data
+name: Datos (EF Core, SQL, procedimientos)
+
+kinds:
+  db-table:
+    label: Tabla de base de datos
+    checklist:
+      - "Quien escribe en ella? Arista writes desde cada servicio o procedimiento. Es la pregunta cara de verdad."
+      - "Tiene triggers en base de datos? Se ejecutan sin que aparezcan en el codigo: arista lifecycle."
+      - "Que entidad de EF la mapea? Si el nombre no coincide, el mapeo es un literal magico."
+      - "Hay procesos externos (integraciones, ETL) que escriban aqui? Registralos aunque no esten en este repositorio."
+
+  db-procedure:
+    label: Procedimiento almacenado o funcion
+    checklist:
+      - "Desde donde se invoca? Casi siempre por nombre en una cadena: arista string-ref, invisible a grep."
+      - "Que tablas lee y escribe? Aristas reads y writes."
+      - "Llama a otros procedimientos? Esa cadena no se ve desde el codigo de la aplicacion."
+
+  ef-entity:
+    label: Entidad de EF Core
+    checklist:
+      - "A que tabla mapea? Si se configura por Fluent API, el nombre esta en otro fichero."
+      - "Tiene interceptores o SaveChanges sobreescrito que la modifiquen? Arista lifecycle."
+      - "Tiene borrado logico o filtros globales? Explica resultados de consulta aparentemente imposibles."
+
+  ef-migration:
+    label: Migracion de EF Core
+    checklist:
+      - "Que tablas altera? Aristas writes."
+      - "Es reversible? Una migracion que no baja limpia hay que saberlo ANTES de desplegar."
+      - "Necesita algun paso manual en produccion? Registralo aqui o se perdera."
+
+  report:
+    label: Informe o consulta de negocio
+    checklist:
+      - "De que tablas o vistas lee? Aristas reads."
+      - "Que reglas de negocio aplica que no esten en el codigo? Suelen vivir en el SQL."
+      - "Quien lo consume? Si un cliente depende de su formato, cambiarlo rompe cosas fuera del repositorio."

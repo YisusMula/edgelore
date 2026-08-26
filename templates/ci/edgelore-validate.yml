@@ -1,0 +1,34 @@
+# Copia este fichero a .github/workflows/ en el repositorio donde uses Edgelore.
+#
+# Es la unica defensa automatica contra que el indice acumule mentiras: valida
+# que los ficheros referenciados existen y que el esquema es correcto. No puede
+# saber si un hecho es falso, pero si que ha dejado de ser coherente.
+
+name: edgelore
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # edgelore stale necesita el historial
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Ajusta la instalacion si aun no publicais el paquete en npm.
+      - run: npm install -g edgelore
+      # Rompe el build solo por errores de esquema: un hecho mal escrito es
+      # culpa de quien lo escribio y se arregla al momento.
+      - run: edgelore validate
+      # Informativo. La desincronizacion con el codigo -ficheros borrados o
+      # movidos- es inevitable en un repositorio vivo: romper el build por ella
+      # dejaria el CI en rojo permanente, y un CI que lleva meses en rojo se
+      # ignora. Se deja visible para que alguien lo limpie con `edgelore prune`.
+      - run: edgelore stale || true
+      - run: edgelore prune || true

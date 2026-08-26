@@ -1,0 +1,64 @@
+# Reglas base de .NET: inyeccion de dependencias, configuracion y hosting.
+#
+# Todo lo que hay aqui son cosas que el runtime hace por su cuenta y que no
+# aparecen como una llamada en ningun sitio del codigo. Son exactamente las
+# conexiones que un grep del simbolo no encuentra.
+
+id: dotnet-core
+name: .NET (DI, configuracion, hosting)
+
+kinds:
+  service:
+    label: Servicio registrado en el contenedor de DI
+    implicit_edges:
+      - member: ctor
+        type: lifecycle
+        trigger: >-
+          el contenedor de DI lo instancia al resolver el tipo; nadie llama al
+          constructor de forma explicita
+        confidence: certain
+    checklist:
+      - "Donde se registra? (AddScoped/AddSingleton/AddTransient). Enlaza con string-ref o calls hacia ese fichero."
+      - "Se registra por interfaz? Anade implements hacia la interfaz: quien la pida recibira este tipo."
+      - "Hay mas de una implementacion registrada para la misma interfaz? Anotalo, es fuente de errores."
+      - "Lee alguna clave de configuracion (IOptions, IConfiguration)? Anade una arista config."
+
+  hosted-service:
+    label: IHostedService / BackgroundService
+    implicit_edges:
+      - member: StartAsync
+        type: lifecycle
+        trigger: el host lo invoca al arrancar la aplicacion, sin llamada explicita
+        confidence: certain
+      - member: ExecuteAsync
+        type: lifecycle
+        trigger: el host lo ejecuta en segundo plano tras StartAsync
+        confidence: certain
+      - member: StopAsync
+        type: lifecycle
+        trigger: el host lo invoca al apagar la aplicacion (o al agotarse el timeout de parada)
+        confidence: certain
+    checklist:
+      - "Cada cuanto se ejecuta el bucle? Si hay temporizador, anade una arista schedules."
+      - "Que pasa si lanza una excepcion no capturada? En .NET moderno tumba el host: anotalo."
+      - "Depende de que otros servicios esten ya arrancados? El orden de registro importa."
+
+  interface:
+    label: Interfaz resuelta por DI
+    checklist:
+      - "Que implementaciones tiene? Cada una deberia declarar implements hacia esta interfaz."
+      - "Se sustituye por un doble en los tests? Anotalo: explica comportamientos raros en test."
+
+  config-key:
+    label: Clave de configuracion (appsettings, variable de entorno)
+    checklist:
+      - "Quien la lee? Cada consumidor deberia tener una arista config hacia esta clave."
+      - "Que valor tiene en produccion frente a desarrollo? Si difiere, es causa habitual de fallos."
+      - "Que ocurre si falta? Excepcion al arrancar o valor por defecto silencioso?"
+
+  event-message:
+    label: Evento, comando o mensaje de bus
+    checklist:
+      - "Quien lo publica? Arista event desde el publicador."
+      - "Quien lo consume? Arista event desde cada consumidor. Aqui es donde se pierde la trazabilidad."
+      - "El consumo es sincrono o diferido? Cambia por completo como se depura."
