@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cmdQuery, cmdImpact, cmdFind, cmdPath, cmdStats, cmdKinds, cmdChecklist, cmdValidate, cmdStale, cmdPrune, cmdRelocate } from '../src/commands/read.js';
+import { cmdQuery, cmdImpact, cmdFind, cmdPath, cmdStats, cmdKinds, cmdChecklist, cmdValidate, cmdStale, cmdPrune, cmdRelocate, cmdSuggest } from '../src/commands/read.js';
 import { cmdAdd, cmdLink, cmdVerify, cmdRemove, cmdRename } from '../src/commands/write.js';
 import { cmdInit, cmdUninstall, cmdRules, availableRuleSets } from '../src/commands/init.js';
 import { cmdHook } from '../src/commands/hook.js';
@@ -19,7 +19,7 @@ import { EDGE_TYPES, CONFIDENCE } from '../src/model.js';
 const VERSION = '0.1.0';
 
 /** Banderas que aceptan valor; el resto son booleanas. Repetibles marcadas aparte. */
-const VALUE_FLAGS = new Set(['file', 'kind', 'summary', 'lang', 'note', 'trigger', 'at', 'confidence', 'dir', 'limit', 'depth', 'module', 'max-age', 'anchor']);
+const VALUE_FLAGS = new Set(['file', 'kind', 'summary', 'lang', 'note', 'trigger', 'at', 'confidence', 'dir', 'limit', 'depth', 'module', 'max-age', 'anchor', 'since']);
 const LIST_FLAGS = new Set(['edge', 'tag', 'rules']);
 
 export function parseArgs(argv) {
@@ -50,7 +50,7 @@ export function parseArgs(argv) {
       // `--rules a,b` y `--rules a --rules b` son equivalentes.
       options[name].push(...String(value).split(',').map((part) => part.trim()).filter(Boolean));
     } else if (VALUE_FLAGS.has(name)) {
-      options[name] = name === 'limit' || name === 'depth' || name === 'max-age' ? Number(value) : value;
+      options[name] = name === 'limit' || name === 'depth' || name === 'max-age' || name === 'since' ? Number(value) : value;
     } else {
       options[name] = true;
     }
@@ -75,6 +75,7 @@ const COMMANDS = {
   relocate: { run: cmdRelocate, help: 'Reajusta las lineas de las referencias que se han desplazado.' },
   prune: { run: cmdPrune, help: 'Lista (o con --apply borra) los hechos cuyo fichero ya no existe.' },
   stale: { run: cmdStale, help: 'Lista los hechos cuyo codigo cambio despues de verificarlos.' },
+  suggest: { run: cmdSuggest, help: 'Por donde empezar a rellenar el indice y que hechos revisar.' },
   stats: { run: cmdStats, help: 'Cobertura del indice.' },
   kinds: { run: cmdKinds, help: 'Tipos de nodo declarados por las reglas activas.' },
   checklist: { run: cmdChecklist, help: 'Comprobaciones manuales asociadas a un kind.' },
@@ -112,6 +113,7 @@ OPCIONES COMUNES
   --limit N       Cuantas listar por nivel antes de resumir (por defecto 12).
   --files         En impact, la lista de trabajo: ficheros concretos a revisar.
   --module P      Limita a los ids que empiecen por ese prefijo de modulo.
+  --since N       En suggest, ventana de dias para medir la rotacion (90).
   --max-age N     Dias tras los que un hecho verificado se marca como no
                   reverificado (por defecto 365). En validate, ademas lista
                   los que lo superan; con --strict, rompe.

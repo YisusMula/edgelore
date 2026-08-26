@@ -61,3 +61,45 @@ export function filesChangedSince(root, commit) {
   if (out === null) return null;
   return new Set(out.split('\0').map((line) => line.trim()).filter(Boolean));
 }
+
+/**
+ * Rotacion por fichero en una ventana de tiempo: cuantos commits lo tocaron y
+ * cuantas personas distintas.
+ *
+ * Una sola invocacion de git para todo el repositorio. Preguntar fichero a
+ * fichero costaria un proceso por fichero, y esto se ejecuta sobre el arbol
+ * entero, no sobre una lista corta.
+ *
+ * Se excluyen las mezclas: un merge que toca doscientos ficheros no dice nada
+ * sobre ninguno de ellos y ahogaria la senal.
+ *
+ * Se usa -z porque git entrecomilla y escapa las rutas no ASCII al escribirlas
+ * en lineas, y este proyecto tiene que funcionar con rutas en castellano.
+ */
+export function churn(root, { sinceDays = 90 } = {}) {
+  const out = git(root, [
+    'log',
+    `--since=${sinceDays} days ago`,
+    '--no-merges',
+    '-z',
+    '--format=%x01%an',
+    '--name-only',
+  ]);
+  if (out === null) return null;
+
+  const files = new Map();
+  let autor = null;
+  for (const raw of out.split('\0')) {
+    const token = raw.trim();
+    if (!token) continue;
+    if (token.startsWith('\x01')) {
+      autor = token.slice(1);
+      continue;
+    }
+    if (!files.has(token)) files.set(token, { commits: 0, authors: new Set() });
+    const entry = files.get(token);
+    entry.commits += 1;
+    if (autor) entry.authors.add(autor);
+  }
+  return files;
+}

@@ -13,7 +13,7 @@ import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
 import { parseEdgeFlag, cmdAdd, cmdLink, cmdRename, cmdVerify } from '../src/commands/write.js';
 import { cmdInit, cmdUninstall, cmdRules, detectRuleSets } from '../src/commands/init.js';
-import { cmdValidate, cmdPrune, cmdStale, cmdRelocate } from '../src/commands/read.js';
+import { cmdValidate, cmdPrune, cmdStale, cmdRelocate, cmdSuggest, ordenarPorRotacion, sinInteresParaIndice } from '../src/commands/read.js';
 import { parseArgs } from '../bin/edgelore.js';
 
 /** Repositorio temporal con Edgelore instalado, para pruebas aisladas. */
@@ -1321,4 +1321,70 @@ test('anchor sin at no tiene sentido y el esquema lo dice', () => {
   const problemas = validateNode({ id: 'A', edges: [{ to: 'B', type: 'calls', anchor: 'algo' }] });
   assert.equal(problemas.length, 1);
   assert.match(problemas[0], /anchor sin at/);
+});
+
+// --- suggest ---------------------------------------------------------------
+//
+// "Registra primero lo que ya os ha hecho perder tiempo" era buen consejo sin
+// herramienta detras. Esto convierte la adopcion -el mayor obstaculo declarado-
+// en una lista de trabajo, con senales que ya existen y sin parsear nada.
+
+test('suggest ordena por commits x personas, no solo por commits', () => {
+  // Un fichero que toca una sola persona muchas veces es su area; uno que tocan
+  // varias es conocimiento compartido que se re-aprende cada vez, y ahi es
+  // donde un indice paga.
+  const orden = ordenarPorRotacion([
+    { file: 'solo.cs', commits: 20, authors: 1 },
+    { file: 'compartido.cs', commits: 12, authors: 4 },
+    { file: 'quieto.cs', commits: 2, authors: 2 },
+  ]);
+  assert.deepEqual(orden.map((e) => e.file), ['compartido.cs', 'solo.cs', 'quieto.cs']);
+});
+
+test('suggest no propone documentacion ni ficheros de bloqueo', () => {
+  // Un README no se ejecuta: no puede tener ninguna de las relaciones ocultas
+  // que Edgelore existe para registrar. Un lockfile lo genera una herramienta y
+  // encabezaria cualquier ranking de rotacion sin que nadie aprenda nada.
+  assert.equal(sinInteresParaIndice('README.md'), true);
+  assert.equal(sinInteresParaIndice('docs/guia.rst'), true);
+  assert.equal(sinInteresParaIndice('package-lock.json'), true);
+  assert.equal(sinInteresParaIndice('src/App/yarn.lock'), true);
+  assert.equal(sinInteresParaIndice('src/A.cs'), false);
+  assert.equal(sinInteresParaIndice('appsettings.json'), false, 'la configuracion si importa');
+});
+
+test('suggest saca los hechos con mas dependientes que nadie confirma', () => {
+  inSandbox((root) => {
+    writeNode(root, { id: 'Hoja', edges: [{ to: 'X', type: 'calls' }] });
+    writeNode(root, { id: 'Hub', edges: [] });
+    for (let i = 0; i < 4; i += 1) {
+      writeNode(root, { id: `Dep${i}`, edges: [{ to: 'Hub', type: 'calls' }] });
+    }
+    const salida = cmdSuggest([], {}).output;
+    assert.match(salida, /4 dependientes {2}Hub {2}\(sin verificar nunca\)/);
+    // Una hoja sin dependientes tambien esta sin verificar, pero revisarla
+    // primero no aporta nada: el orden es lo que hace util la lista.
+    assert.ok(!salida.includes('Hoja'), salida);
+  });
+});
+
+test('suggest calla sobre lo que ya esta verificado y al dia', () => {
+  inSandbox((root) => {
+    writeNode(root, {
+      id: 'Hub',
+      edges: [],
+      verified: { fingerprint: 'sha256:0123456789abcdef', date: new Date().toISOString().slice(0, 10) },
+    });
+    writeNode(root, { id: 'Dep', edges: [{ to: 'Hub', type: 'calls' }] });
+    assert.match(cmdSuggest([], {}).output, /estan verificados y al dia/);
+  });
+});
+
+test('suggest degrada sin git en vez de fallar', () => {
+  inSandbox((root) => {
+    writeNode(root, { id: 'A', edges: [] });
+    const salida = cmdSuggest([], {}).output;
+    assert.match(salida, /hace falta git/);
+    assert.match(salida, /POR REVISAR/, 'la otra mitad sale igual: solo necesita el indice');
+  });
 });

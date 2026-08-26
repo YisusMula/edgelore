@@ -32,12 +32,13 @@ import {
   workList,
   renderWorkList,
   didYouMean,
+  decayLabel,
   ageInDays,
   formatAge,
   DEFAULT_MAX_AGE_DAYS,
 } from '../query.js';
 import { loadRules, kindCatalog, renderKinds, checklistFor, renderChecklist } from '../rules.js';
-import { changedSince, filesChangedSince, isGitRepo, lastCommitFor } from '../git.js';
+import { changedSince, filesChangedSince, isGitRepo, lastCommitFor, churn } from '../git.js';
 import { fingerprintFile } from '../fingerprint.js';
 import { checkAnchor, withLine } from '../anchor.js';
 
@@ -516,4 +517,137 @@ export function cmdRelocate(args, options) {
   }
 
   return { output: lines.join('\n'), code: perdidas.length ? 1 : 0 };
+}
+
+/**
+ * Por donde empezar y que se esta pudriendo.
+ *
+ * "Registra primero lo que ya os ha hecho perder tiempo" es buen consejo sin
+ * herramienta detras, y el mayor obstaculo declarado de Edgelore es empezar en
+ * cero. Este comando convierte la adopcion en una lista de trabajo usando
+ * senales que ya existen, sin parsear nada ni adivinar el lenguaje.
+ *
+ * Son DOS preguntas distintas y por eso salen en dos bloques:
+ *
+ *   - Que falta por cubrir: ficheros que el equipo toca mucho y no estan en el
+ *     indice. Es donde el conocimiento se vuelve a aprender cada vez.
+ *   - Que hay que revisar: hechos de los que depende mucha gente y que nadie
+ *     confirma desde hace tiempo. Un hecho con mucho fan-in que miente hace
+ *     mas dano que veinte hechos hoja obsoletos.
+ */
+const SUGGEST_LIMIT = 10;
+
+/**
+ * Lo que nunca merece un hecho, por mucho que se toque.
+ *
+ * No es adivinar el lenguaje -eso romperia la promesa de ser agnostico-, es
+ * descartar dos FORMATOS que se comportan igual en cualquier stack:
+ *
+ *   - documentacion en texto plano: no se ejecuta, asi que no puede tener
+ *     ninguna de las relaciones ocultas que Edgelore existe para registrar.
+ *   - ficheros de bloqueo de dependencias: cambian constantemente y los genera
+ *     una herramienta, de modo que encabezan cualquier ranking de rotacion sin
+ *     que nadie haya aprendido nada al tocarlos.
+ *
+ * La configuracion (.json, .yaml, .xml) NO se descarta: ahi viven las claves de
+ * las que depende el codigo, que son justo aristas `config`.
+ *
+ * `--all` lo desactiva, por si en algun repositorio esto estorba.
+ */
+const DOC_EXT = /\.(md|markdown|txt|rst|adoc)$/i;
+const LOCKFILE = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Gemfile\.lock|poetry\.lock|Cargo\.lock|packages\.lock\.json)$/i;
+
+export function sinInteresParaIndice(file) {
+  return DOC_EXT.test(file) || LOCKFILE.test(file);
+}
+
+/**
+ * commits x personas, no solo commits. Un fichero que toca una sola persona
+ * cincuenta veces es su area; uno que tocan seis personas veinte veces es
+ * conocimiento compartido que se re-aprende cada vez, y ahi es donde un indice
+ * paga. Es una heuristica, y la salida dice que lo es.
+ */
+export function ordenarPorRotacion(entradas) {
+  return entradas.sort(
+    (a, b) => b.commits * b.authors - a.commits * a.authors || b.commits - a.commits || a.file.localeCompare(b.file),
+  );
+}
+
+export function cmdSuggest(args, options) {
+  const root = requireStoreRoot();
+  const index = loadIndex(root);
+  const limit = Number.isFinite(options.limit) && options.limit > 0 ? options.limit : SUGGEST_LIMIT;
+  const sinceDays = Number.isFinite(options.since) && options.since > 0 ? options.since : 90;
+  const maxAgeDays = maxAgeFrom(options);
+
+  // --- que falta por cubrir -------------------------------------------------
+  const cubiertos = new Set();
+  for (const node of index.nodes.values()) if (node.file) cubiertos.add(node.file);
+
+  const rotacion = churn(root, { sinceDays });
+  const sinCubrir = [];
+  if (rotacion) {
+    for (const [file, datos] of rotacion) {
+      if (cubiertos.has(file) || file.startsWith('.edgelore/')) continue;
+      if (!options.all && sinInteresParaIndice(file)) continue;
+      // Un fichero borrado durante la ventana sigue apareciendo en el log, pero
+      // no hay nada que registrar sobre el.
+      if (!fs.existsSync(path.join(root, file))) continue;
+      sinCubrir.push({ file, commits: datos.commits, authors: datos.authors.size });
+    }
+    ordenarPorRotacion(sinCubrir);
+  }
+
+  // --- que hay que revisar --------------------------------------------------
+  const podridos = [];
+  for (const node of index.nodes.values()) {
+    const fanIn = (index.incoming.get(node.id) ?? []).length;
+    if (!fanIn) continue;
+    const motivo = !node.verified?.date
+      ? 'sin verificar nunca'
+      : decayLabel(node.verified, { maxAgeDays }) ?? null;
+    if (!motivo) continue;
+    podridos.push({ id: node.id, fanIn, motivo });
+  }
+  podridos.sort((a, b) => b.fanIn - a.fanIn || a.id.localeCompare(b.id));
+
+  if (options.json) {
+    return { output: JSON.stringify({ sinCubrir: sinCubrir.slice(0, limit), podridos: podridos.slice(0, limit) }, null, 2) };
+  }
+
+  const lines = [];
+
+  lines.push(`POR CUBRIR - lo mas tocado en los ultimos ${sinceDays} dias sin ningun hecho:`);
+  if (!rotacion) {
+    lines.push('  (hace falta git para saber que se toca mas; sin el no hay senal que ordenar)');
+  } else if (!sinCubrir.length) {
+    lines.push('  Nada: todo lo que se ha tocado ultimamente ya tiene algun hecho.');
+  } else {
+    const ancho = String(sinCubrir[0].commits).length;
+    for (const entry of sinCubrir.slice(0, limit)) {
+      const commits = `${entry.commits} commit${entry.commits === 1 ? '' : 's'}`;
+      const personas = `${entry.authors} persona${entry.authors === 1 ? '' : 's'}`;
+      lines.push(`  ${commits.padStart(ancho + 8)}  ${personas.padEnd(11)} ${entry.file}`);
+    }
+    lines.push('');
+    lines.push('  Es una heuristica: mucho movimiento y varias manos suele significar');
+    lines.push('  conocimiento que se re-aprende cada vez. Mira la lista y elige tu.');
+    if (!options.all) lines.push('  (se omiten documentacion y ficheros de bloqueo; --all los incluye)');
+    lines.push(`  Registra uno con: edgelore add <Id> --file ${sinCubrir[0].file} --kind <kind>`);
+  }
+
+  lines.push('');
+  lines.push('POR REVISAR - hechos de los que depende mas gente y nadie confirma:');
+  if (!podridos.length) {
+    lines.push('  Nada: los hechos con dependientes estan verificados y al dia.');
+  } else {
+    for (const entry of podridos.slice(0, limit)) {
+      lines.push(`  ${String(entry.fanIn).padStart(3)} dependientes  ${entry.id}  (${entry.motivo})`);
+    }
+    lines.push('');
+    lines.push('  Un hecho con mucho fan-in que miente hace mas dano que veinte hojas obsoletas.');
+    lines.push(`  Confirmalos con: edgelore verify ${podridos[0].id}`);
+  }
+
+  return { output: lines.join('\n') };
 }

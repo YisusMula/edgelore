@@ -150,10 +150,38 @@ edgelore validate                         # esquema (rompe CI) + desincronizaci�
 edgelore validate --max-age 365           # además: hechos que nadie reverifica desde hace un año
 edgelore prune                            # hechos cuyo fichero ya no existe; --apply borra
 edgelore stats                            # cobertura
+edgelore suggest                          # por dónde empezar y qué revisar
 ```
 
 `edgelore kinds` lista los tipos de nodo que conocen las reglas activas, y
 `edgelore checklist <kind>` te dice qué comprobar al registrar uno.
+
+## Por dónde empezar
+
+Empezar en cero es el obstáculo real, y «registra lo que ya os ha hecho perder
+tiempo» es buen consejo sin herramienta detrás. `edgelore suggest` lo convierte
+en una lista:
+
+```
+$ edgelore suggest
+
+POR CUBRIR - lo mas tocado en los ultimos 90 dias sin ningun hecho:
+  16 commits  2 personas  src/Ventas/PagoService.cs
+  13 commits  1 persona   src/Ui/DetallePage.xaml.cs
+   ...
+
+POR REVISAR - hechos de los que depende mas gente y nadie confirma:
+    4 dependientes  Erp.Base.PageBase  (sin reverificar desde hace 2 años)
+```
+
+Son dos preguntas distintas. La primera ordena por **commits × personas**, no
+por commits: un fichero que toca una sola persona cincuenta veces es su área;
+uno que tocan seis personas veinte veces es conocimiento que se re-aprende cada
+vez, y ahí es donde un índice paga. Es una heurística y la salida lo dice.
+
+La segunda es la que evita el fallo caro: un hecho del que dependen cuarenta
+cosas y que lleva dos años sin confirmarse hace más daño que veinte hechos hoja
+obsoletos.
 
 ## Cómo crece solo
 
@@ -208,7 +236,7 @@ Dicho ahora y no dentro de tres meses:
 
 - **Empiezas en cero.** El ahorro llega a los meses, no a la semana. Registra
   primero lo que ya os ha hecho perder tiempo, no intentes cubrir el proyecto
-  entero.
+  entero; `edgelore suggest` te dice por dónde.
 - **Un hecho obsoleto es peor que ninguno**, porque se lee con confianza. Por eso
   cada hecho lleva `confidence` y una huella del contenido que describe, y por
   eso existe `edgelore stale`. Pasado un año sin reverificar, las consultas dejan de
@@ -220,7 +248,7 @@ Dicho ahora y no dentro de tres meses:
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 151 pruebas).
+v0.1. El núcleo curado está completo y probado (`npm test`, 156 pruebas).
 
 Siguiente paso previsto: un extractor opcional basado en Roslyn que emita hechos
 en este mismo formato con `source: extractor:roslyn`, para poblar las aristas

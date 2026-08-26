@@ -139,6 +139,10 @@ deja de servir muy rapido.
 edgelore rename Erp.Ui.ViejaPage Erp.Ui.NuevaPage
 ```
 
+Si te piden por donde empezar a rellenar el indice, o que hay que revisar,
+`edgelore suggest` lo responde: lo mas tocado sin ningun hecho, y los hechos con
+mas dependientes que nadie confirma desde hace tiempo.
+
 `edgelore kinds` lista los tipos de nodo que conocen las reglas activas.
 `edgelore checklist <kind>` te dice que comprobar para ese tipo: usalo cuando
 registres un nodo nuevo, porque son justo las preguntas cuya respuesta se pierde.
