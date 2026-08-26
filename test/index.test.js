@@ -20,6 +20,7 @@ import { parseEdgeFlag, cmdAdd, cmdLink, cmdRename, cmdVerify } from '../src/com
 import { cmdInit, cmdUninstall, cmdRules, detectRuleSets } from '../src/commands/init.js';
 import { cmdValidate, cmdPrune, cmdStale, cmdRelocate, cmdSuggest, ordenarPorRotacion, sinInteresParaIndice, cmdScan } from '../src/commands/read.js';
 import { parseArgs } from '../bin/edgelore.js';
+import { requiereMayusculas } from './entorno.js';
 
 /** Repositorio temporal con Edgelore instalado, para pruebas aisladas. */
 function sandbox() {
@@ -298,7 +299,11 @@ test('readNode no devuelve un hecho cuyo id no coincide con el pedido', () => {
   assert.equal(readNode(root, 'Impostor'), null);
 });
 
-test('validate avisa de ids que colisionarian en Windows', () => {
+test('validate avisa de ids que colisionarian en Windows', requiereMayusculas(), () => {
+  // La prueba necesita que los dos ficheros COEXISTAN para que loadIndex vea la
+  // colision. En un sistema insensible a mayusculas -Windows, y macOS por
+  // defecto- el segundo pisa al primero y no hay nada que detectar: no es que
+  // el aviso falle, es que la situacion que avisa no se puede montar ahi.
   const root = sandbox();
   writeNode(root, { id: 'PagoService', edges: [] });
   writeNode(root, { id: 'pagoservice', edges: [] });
@@ -1561,4 +1566,52 @@ test('reimportar conserva lo que ha escrito una persona', () => {
     assert.match(importada.trigger, /05:00/, 'y el horario si se actualiza');
     assert.equal(node.edges.filter((e) => e.source === 'import:cron').length, 1, 'sin duplicar');
   });
+});
+
+// --- Compatibilidad entre sistemas -----------------------------------------
+
+test('los ficheros con CRLF se leen igual que con LF', () => {
+  // En Windows, git materializa el arbol con CRLF por defecto (core.autocrlf).
+  // Si el parser no lo tolerara, un equipo mixto veria el indice roto solo en
+  // algunas maquinas, que es la clase de fallo que cuesta dias localizar.
+  const root = sandbox();
+  writeNode(root, { id: 'Pagina', file: 'src/A.cs', kind: 'maui-page', edges: [{ to: 'B', type: 'calls' }] });
+
+  const nodos = path.join(root, '.edgelore', 'nodes');
+  const reglas = path.join(root, '.edgelore', 'rules');
+  for (const dir of [nodos, reglas]) {
+    for (const nombre of fs.readdirSync(dir)) {
+      const file = path.join(dir, nombre);
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/\r?\n/g, '\r\n'));
+    }
+  }
+
+  const index = loadIndex(root);
+  assert.deepEqual(index.problems, [], 'el indice se lee sin errores de esquema');
+  assert.equal(index.nodes.get('Pagina').edges[0].to, 'B');
+  assert.ok(kindCatalog(loadRules(root)).has('maui-page'), 'las reglas tambien');
+});
+
+test('deriveId y los globs trabajan con / aunque el sistema use \\', () => {
+  // repoFiles normaliza antes, asi que un mismo detector vale en los dos
+  // sistemas; comprobarlo evita que alguien "arregle" eso metiendo path.sep.
+  assert.equal(deriveId('src/Ui/DetallePage.cs', { strip_prefix: ['src/'] }), 'Ui.DetallePage');
+  assert.equal(globMatcher(['**/*.cs'])('src/Ui/A.cs'), true);
+});
+
+test('las rutas se guardan siempre con barras normales', () => {
+  // En Windows se registraria `src\A.cs`, y entonces scan y suggest -que
+  // comparan contra `git ls-files`, que usa / en todos los sistemas- no lo
+  // reconocerian como cubierto y volverian a proponerlo.
+  const root = sandbox();
+  writeNode(root, { id: 'A', file: 'src\\Ui\\A.cs', edges: [] });
+  assert.equal(readNode(root, 'A').file, 'src/Ui/A.cs');
+});
+
+test('una ruta absoluta de Windows se rechaza como cualquier otra absoluta', () => {
+  // No empieza por `/`, asi que se colaba y dejaba un hecho que solo resuelve
+  // en la maquina de quien lo escribio.
+  assert.match(validateNode({ id: 'A', file: 'C:\\proyectos\\erp\\A.cs' })[0], /ruta relativa/);
+  assert.match(validateNode({ id: 'A', file: '/opt/erp/A.cs' })[0], /ruta relativa/);
+  assert.deepEqual(validateNode({ id: 'A', file: 'src/A.cs' }), []);
 });

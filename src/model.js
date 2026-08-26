@@ -92,6 +92,19 @@ export function normalizeEdge(edge) {
   return out;
 }
 
+/**
+ * Las rutas se guardan SIEMPRE con `/`, venga como venga.
+ *
+ * En Windows, `edgelore add X --file src\\A.cs` guardaria la ruta con barras
+ * invertidas, y entonces `scan` y `suggest` -que comparan contra la lista de
+ * `git ls-files`, que usa `/` en todos los sistemas- no reconocerian ese
+ * fichero como cubierto y volverian a proponerlo. El mismo repositorio daria
+ * respuestas distintas segun quien hubiera registrado el hecho.
+ */
+export function normalizePath(file) {
+  return String(file).replace(/\\/g, '/');
+}
+
 /** Ordena las claves del sello de verificacion; devuelve null si no hay sello. */
 export function normalizeVerified(verified) {
   if (!verified || typeof verified !== 'object' || Array.isArray(verified)) return null;
@@ -129,6 +142,8 @@ export function normalizeNode(node) {
     } else if (key === 'tags') {
       const tags = asArray(node.tags);
       if (tags.length) out.tags = [...new Set(tags)].sort();
+    } else if (key === 'file' && node.file) {
+      out.file = normalizePath(node.file);
     } else if (node[key] !== undefined && node[key] !== null && node[key] !== '') {
       out[key] = node[key];
     }
@@ -157,8 +172,13 @@ export function validateNode(node, { source = 'hecho' } = {}) {
   if (node.file !== undefined && typeof node.file !== 'string') {
     fail('file debe ser una ruta relativa a la raiz del repositorio');
   }
-  if (node.file && (node.file.startsWith('/') || node.file.includes('..'))) {
-    fail(`file debe ser una ruta relativa dentro del repositorio ("${node.file}")`);
+  if (node.file && typeof node.file === 'string') {
+    const ruta = normalizePath(node.file);
+    // Tambien se rechaza `C:/...`: una ruta absoluta de Windows no empieza por
+    // `/` y se colaba, dejando un hecho que solo resuelve en una maquina.
+    if (ruta.startsWith('/') || ruta.includes('..') || /^[A-Za-z]:/.test(ruta)) {
+      fail(`file debe ser una ruta relativa dentro del repositorio ("${node.file}")`);
+    }
   }
 
   asArray(node.edges).forEach((edge, index) => {
