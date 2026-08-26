@@ -9,11 +9,16 @@ import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, is
 import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
 import { fingerprintOf, normalizeContent, fingerprintFile } from '../src/fingerprint.js';
 import { parseAt, normalizeAnchor, captureAnchor, checkAnchor } from '../src/anchor.js';
+import { globMatcher } from '../src/glob.js';
+import { deriveId } from '../src/scan.js';
+import { parseCrontab, describeSchedule, jobName, looksLikeCron } from '../src/import/cron.js';
+import { parseTimer, parseIni } from '../src/import/systemd.js';
+import { cmdImport } from '../src/commands/import.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
 import { parseEdgeFlag, cmdAdd, cmdLink, cmdRename, cmdVerify } from '../src/commands/write.js';
 import { cmdInit, cmdUninstall, cmdRules, detectRuleSets } from '../src/commands/init.js';
-import { cmdValidate, cmdPrune, cmdStale, cmdRelocate, cmdSuggest, ordenarPorRotacion, sinInteresParaIndice } from '../src/commands/read.js';
+import { cmdValidate, cmdPrune, cmdStale, cmdRelocate, cmdSuggest, ordenarPorRotacion, sinInteresParaIndice, cmdScan } from '../src/commands/read.js';
 import { parseArgs } from '../bin/edgelore.js';
 
 /** Repositorio temporal con Edgelore instalado, para pruebas aisladas. */
@@ -1386,5 +1391,174 @@ test('suggest degrada sin git en vez de fallar', () => {
     const salida = cmdSuggest([], {}).output;
     assert.match(salida, /hace falta git/);
     assert.match(salida, /POR REVISAR/, 'la otra mitad sale igual: solo necesita el indice');
+  });
+});
+
+// --- Detectores y scan -----------------------------------------------------
+//
+// El paso intermedio entre "empiezas en cero" y "hace falta un parser". Un
+// detector no entiende el lenguaje: reconoce una convencion que el equipo
+// declara en un fichero versionado.
+
+test('los globs cubren lo que aparece en un detector real', () => {
+  const casa = (glob, file) => globMatcher([glob])(file);
+  assert.equal(casa('**/*Page.xaml.cs', 'src/Ui/DetallePage.xaml.cs'), true);
+  assert.equal(casa('**/*Page.xaml.cs', 'DetallePage.xaml.cs'), true, '**/ tambien casa con ninguna carpeta');
+  assert.equal(casa('**/*Page.xaml.cs', 'src/Ui/Detalle.cs'), false);
+  assert.equal(casa('src/**/*.cs', 'otro/A.cs'), false, 'el prefijo se respeta');
+  assert.equal(casa('*.controller.ts', 'a/user.controller.ts'), false, '* no cruza separadores');
+  assert.equal(casa('**/*.{cs,vb}', 'src/A.vb'), true);
+  assert.equal(casa('**/*.cs', 'src/A.CS'), false, 'sensible a mayusculas, como el disco en Linux');
+});
+
+test('deriveId quita el sufijo mas largo aunque se declaren en otro orden', () => {
+  // Con [".cs", ".xaml.cs"] al reves quedaria "DetallePage.xaml".
+  const id = deriveId('src/Ui/DetallePage.xaml.cs', {
+    strip_prefix: ['src/'],
+    strip_suffix: ['.cs', '.xaml.cs'],
+  });
+  assert.equal(id, 'Ui.DetallePage');
+});
+
+test('deriveId no produce ids que el esquema vaya a rechazar', () => {
+  // Una ruta que empieza por digito daria un id invalido, y el fallo saldria
+  // mucho despues, cuando ya no hay contexto para explicarlo.
+  const id = deriveId('2024/informe.cs', {});
+  assert.equal(id, '_2024.informe');
+  assert.deepEqual(validateNode({ id }), []);
+});
+
+test('scan propone solo lo que no tiene hecho, y dice de cuantos', () => {
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src', 'Ui'), { recursive: true });
+    for (const n of ['Detalle', 'Lista']) {
+      fs.writeFileSync(path.join(root, 'src', 'Ui', `${n}Page.xaml.cs`), 'class X : ContentPage {}\n');
+    }
+    fs.writeFileSync(path.join(root, 'src', 'Ui', 'NoEsPagina.cs'), 'class Y {}\n');
+    writeNode(root, { id: 'Ui.DetallePage', file: 'src/Ui/DetallePage.xaml.cs', edges: [] });
+
+    const salida = cmdScan([], {}).output;
+    assert.match(salida, /maui-page.*1 sin hecho de 2 que casan/);
+    assert.match(salida, /Ui\.ListaPage/);
+    assert.ok(!salida.includes('NoEsPagina'), 'el glob no casa con ese');
+  });
+});
+
+test('scan --apply exige un kind concreto', () => {
+  // Registrar de golpe los candidatos de todas las reglas llenaria el indice de
+  // conjeturas que nadie ha mirado.
+  inSandbox((root) => {
+    const resultado = cmdScan([], { apply: true });
+    assert.equal(resultado.code, 1);
+    assert.match(resultado.output, /hace falta decir que kind/);
+  });
+});
+
+test('scan --apply escribe candidatos sin verificar, con las aristas del kind', () => {
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src', 'Ui'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'Ui', 'ListaPage.xaml.cs'), 'class X : ContentPage {}\n');
+    cmdScan(['maui-page'], { apply: true });
+
+    const node = readNode(root, 'Ui.ListaPage');
+    assert.equal(node.kind, 'maui-page');
+    assert.equal(node.verified, undefined, 'una conjetura no se sella');
+    assert.ok(node.edges.length >= 4, 'las aristas implicitas del kind si se aplican');
+    assert.ok(node.edges.every((e) => e.source === 'rule:dotnet-maui'));
+  });
+});
+
+test('scan respeta el contenido exigido por el detector', () => {
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    // Casa con el glob pero no con `contains`: no es una pagina.
+    fs.writeFileSync(path.join(root, 'src', 'FalsaPage.xaml.cs'), 'class X { }\n');
+    assert.ok(!cmdScan([], {}).output.includes('FalsaPage'));
+  });
+});
+
+// --- Adaptadores de manifiesto ---------------------------------------------
+//
+// El codigo que se ejecuta cada noche a las dos no contiene ni una pista de que
+// algo lo ejecuta cada noche a las dos. Es una arista `schedules` en estado
+// puro, y ya esta escrita en un fichero de texto.
+
+test('looksLikeCron rechaza una frase de seis palabras', () => {
+  // Sin esta comprobacion, cualquier linea suelta del fichero se convertia en
+  // una tarea con un horario inventado.
+  assert.equal(looksLikeCron(['*/5', '*', '*', '*', '*']), true);
+  assert.equal(looksLikeCron(['0', '0', '1', '*', 'MON']), true);
+  assert.equal(looksLikeCron(['esto', 'no', 'es', 'una', 'linea']), false);
+});
+
+test('describeSchedule traduce solo lo inequivoco', () => {
+  // Una traduccion a medias de un horario es peor que no traducir: quien la lee
+  // se fia y planifica sobre ella.
+  assert.equal(describeSchedule('*/5 * * * *'), 'cada 5 minutos');
+  assert.equal(describeSchedule('0 2 * * *'), 'todos los dias a las 02:00');
+  assert.equal(describeSchedule('15 3 * * 1'), null, 'los lunes: no se arriesga');
+  assert.equal(describeSchedule('0 0 1,15 * *'), null);
+});
+
+test('jobName se salta el interprete', () => {
+  assert.equal(jobName('/usr/bin/dotnet /opt/erp/Facturacion.dll --nocturno'), 'Facturacion');
+  assert.equal(jobName('/usr/bin/python3 /opt/erp/informes.py'), 'informes');
+  assert.equal(jobName('/opt/scripts/limpieza.sh'), 'limpieza');
+});
+
+test('el crontab produce la arista en la direccion que responde "quien ejecuta esto"', () => {
+  // Las entrantes se derivan al consultar, asi que el disparador tiene que ser
+  // el origen para que `query Facturacion` conteste.
+  const { nodes } = parseCrontab('0 2 * * * /usr/bin/dotnet /opt/erp/Facturacion.dll\n');
+  assert.equal(nodes.length, 1);
+  assert.equal(nodes[0].id, 'cron.Facturacion');
+  assert.equal(nodes[0].edges[0].to, 'Facturacion');
+  assert.equal(nodes[0].edges[0].type, 'schedules');
+  assert.equal(nodes[0].edges[0].confidence, 'unverified', 'el destino es una deduccion');
+});
+
+test('dos tareas del mismo ejecutable no se pisan', () => {
+  const { nodes } = parseCrontab('0 2 * * * /app/F.dll --diario\n15 3 * * 1 /app/F.dll --semanal\n');
+  assert.deepEqual(nodes.map((n) => n.id), ['cron.F', 'cron.F.2']);
+});
+
+test('el crontab ignora comentarios y variables de entorno', () => {
+  const { nodes, problemas } = parseCrontab('# comentario\nPATH=/usr/bin\nMAILTO=a@b.c\n@daily /app/x.sh\n');
+  assert.equal(nodes.length, 1);
+  assert.deepEqual(problemas, []);
+});
+
+test('un .timer de systemd apunta a su .service por convencion', () => {
+  const { nodes } = parseTimer('[Timer]\nOnCalendar=daily\n', 'backup');
+  assert.equal(nodes[0].id, 'systemd.backup');
+  assert.equal(nodes[0].edges[0].to, 'backup', 'x.timer dispara x.service');
+});
+
+test('un .timer sin horario se reporta en vez de inventarselo', () => {
+  const { nodes, problemas } = parseTimer('[Unit]\nDescription=x\n', 'roto');
+  assert.equal(nodes.length, 0);
+  assert.equal(problemas.length, 1);
+});
+
+test('reimportar conserva lo que ha escrito una persona', () => {
+  // Un importador que pisa el trabajo humano se ejecuta una vez y no se vuelve
+  // a tocar, y entonces el hecho envejece igual que si no existiera.
+  inSandbox((root) => {
+    const crontab = path.join(root, 'crontab.txt');
+    fs.writeFileSync(crontab, '0 2 * * * /app/Facturacion.dll\n');
+    cmdImport(['cron', crontab], {});
+
+    cmdLink(['cron.Facturacion', 'Erp.Core.Facturacion', 'calls'], { note: 'el punto de entrada real' });
+
+    fs.writeFileSync(crontab, '0 5 * * * /app/Facturacion.dll\n');
+    cmdImport(['cron', crontab], {});
+
+    const node = readNode(root, 'cron.Facturacion');
+    const humana = node.edges.find((e) => e.to === 'Erp.Core.Facturacion');
+    assert.ok(humana, 'la arista escrita a mano sobrevive');
+    assert.equal(humana.note, 'el punto de entrada real');
+    const importada = node.edges.find((e) => e.source === 'import:cron');
+    assert.match(importada.trigger, /05:00/, 'y el horario si se actualiza');
+    assert.equal(node.edges.filter((e) => e.source === 'import:cron').length, 1, 'sin duplicar');
   });
 });

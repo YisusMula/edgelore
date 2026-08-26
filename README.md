@@ -151,10 +151,58 @@ edgelore validate --max-age 365           # además: hechos que nadie reverifica
 edgelore prune                            # hechos cuyo fichero ya no existe; --apply borra
 edgelore stats                            # cobertura
 edgelore suggest                          # por dónde empezar y qué revisar
+
+# poblar
+edgelore scan                             # candidatos según los detectores de las reglas
+edgelore scan maui-page --apply           # registrarlos (sin sellar: son conjeturas)
+edgelore import cron /etc/crontab         # lo que ya está declarado fuera del código
 ```
 
 `edgelore kinds` lista los tipos de nodo que conocen las reglas activas, y
 `edgelore checklist <kind>` te dice qué comprobar al registrar uno.
+
+## Poblar sin empezar a mano
+
+Dos caminos que no dependen de que nadie se acuerde de nada.
+
+**Detectores.** Una regla puede declarar cómo se reconoce un `kind`, y
+`edgelore scan` propone candidatos:
+
+```
+$ edgelore scan
+maui-page  (regla dotnet-maui): 4 sin hecho de 4 que casan
+  Erp.Ui.DetallePage                       src/Erp.Ui/Ui/DetallePage.xaml.cs
+  ...
+Los ids salen derivados de la ruta: MIRALOS antes de aplicar.
+
+$ edgelore scan maui-page --apply
+4 hecho(s) registrados como candidatos del kind "maui-page".
+```
+
+Cuatro páginas, dieciséis aristas de ciclo de vida —todas invisibles a grep— en
+una orden. Una expresión regular no entiende el lenguaje: reconoce una
+convención que declara el equipo. Los candidatos se escriben **sin sellar**,
+porque casar con un glob es una conjetura sobre dónde mirar, no una afirmación
+sobre el código. `--apply` exige nombrar el `kind`: dejar que una sola orden
+registre todo llenaría el índice de conjeturas que nadie ha revisado.
+
+**Adaptadores de manifiesto.** Parte del cableado oculto ya está escrito fuera
+del código, en formatos idénticos en cualquier stack:
+
+```
+$ edgelore import cron /etc/crontab
+5 hecho(s) nuevos desde cron:  cron.Sincronizador, cron.Facturacion, ...
+
+$ edgelore query Sincronizador
+LLEGA DESDE (1):
+  schedules   cron.Sincronizador
+              disparado por: cada 5 minutos (cron: */5 * * * *)
+```
+
+El código que corre cada noche a las dos no contiene ni una pista de que algo lo
+ejecuta cada noche a las dos. Es una arista `schedules` en estado puro. Hoy hay
+adaptadores de `cron` y de temporizadores de `systemd`; reimportar **conserva lo
+que haya escrito una persona** y solo actualiza lo que vino del manifiesto.
 
 ## Por dónde empezar
 
@@ -248,12 +296,18 @@ Dicho ahora y no dentro de tres meses:
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 156 pruebas).
+v0.1. El núcleo curado está completo y probado (`npm test`, 172 pruebas).
 
-Siguiente paso previsto: un extractor opcional basado en Roslyn que emita hechos
-en este mismo formato con `source: extractor:roslyn`, para poblar las aristas
-explícitas automáticamente y dejar la curación humana para lo que de verdad la
-necesita. El formato ya distingue el origen de cada arista precisamente para eso.
+El formato distingue el origen de cada arista (`human`, `rule:`, `import:`,
+`extractor:`) precisamente para poder poblarlo por varias vías sin perder de
+vista quién afirma qué.
+
+Un extractor atado a un lenguaje (Roslyn) **no** es el siguiente paso previsto:
+sería el movimiento menos general posible en una herramienta cuya ventaja es no
+depender de ningún parser, y duplicaría lo que el IDE ya hace bien —las llamadas
+explícitas— que es justo lo que este README describe como ruido que no ahorra
+nada. Los detectores y los adaptadores cubren el mismo hueco sin atarse a ningún
+compilador.
 
 ## Documentación
 

@@ -103,3 +103,17 @@ export function churn(root, { sinceDays = 90 } = {}) {
   }
   return files;
 }
+
+/**
+ * Ficheros versionados, o null si no hay git.
+ *
+ * Preferirlo a recorrer el disco no es una optimizacion: git ya sabe que hay
+ * que ignorar. Sin esto habria que reimplementar `.gitignore` -y equivocarse-
+ * para no proponer `node_modules`, `obj/` y `bin/` como sitios donde registrar
+ * hechos.
+ */
+export function trackedFiles(root) {
+  const out = git(root, ['ls-files', '-z']);
+  if (out === null) return null;
+  return out.split('\0').map((line) => line.trim()).filter(Boolean);
+}

@@ -10,10 +10,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cmdQuery, cmdImpact, cmdFind, cmdPath, cmdStats, cmdKinds, cmdChecklist, cmdValidate, cmdStale, cmdPrune, cmdRelocate, cmdSuggest } from '../src/commands/read.js';
+import { cmdQuery, cmdImpact, cmdFind, cmdPath, cmdStats, cmdKinds, cmdChecklist, cmdValidate, cmdStale, cmdPrune, cmdRelocate, cmdSuggest, cmdScan } from '../src/commands/read.js';
 import { cmdAdd, cmdLink, cmdVerify, cmdRemove, cmdRename } from '../src/commands/write.js';
 import { cmdInit, cmdUninstall, cmdRules, availableRuleSets } from '../src/commands/init.js';
 import { cmdHook } from '../src/commands/hook.js';
+import { cmdImport, adapterNames } from '../src/commands/import.js';
 import { EDGE_TYPES, CONFIDENCE } from '../src/model.js';
 
 const VERSION = '0.1.0';
@@ -75,6 +76,8 @@ const COMMANDS = {
   relocate: { run: cmdRelocate, help: 'Reajusta las lineas de las referencias que se han desplazado.' },
   prune: { run: cmdPrune, help: 'Lista (o con --apply borra) los hechos cuyo fichero ya no existe.' },
   stale: { run: cmdStale, help: 'Lista los hechos cuyo codigo cambio despues de verificarlos.' },
+  import: { run: cmdImport, help: 'Importa hechos de un manifiesto: crontab, temporizador de systemd.' },
+  scan: { run: cmdScan, help: 'Propone hechos con los detectores de las reglas. --apply los escribe.' },
   suggest: { run: cmdSuggest, help: 'Por donde empezar a rellenar el indice y que hechos revisar.' },
   stats: { run: cmdStats, help: 'Cobertura del indice.' },
   kinds: { run: cmdKinds, help: 'Tipos de nodo declarados por las reglas activas.' },
@@ -106,7 +109,7 @@ OPCIONES COMUNES
   --json          Salida en JSON para herramientas.
   --brief         Omite las notas largas en query.
   --strict        En validate, la desincronizacion con el codigo tambien rompe.
-  --apply         En prune y relocate, actua de verdad. Sin el, solo lista.
+  --apply         En prune, relocate y scan, actua de verdad. Sin el, solo lista.
   --unverified    Al escribir, no sella el hecho como verificado.
   --confidence X  certain, likely o unverified.
   --all           En query/impact, lista todas las dependencias sin recortar.
@@ -133,6 +136,9 @@ EJEMPLOS
   edgelore impact Base.PageBase.OnAppearing --files --module Erp.Ventas
   edgelore query Erp.Ui.DetallePage
   edgelore path AppShell Erp.Data.FacturaRepository
+
+ADAPTADORES DE import
+  ${adapterNames().join(', ')}
 
 REGLAS DISPONIBLES EN init
   ${availableRuleSets().join(', ') || '(ninguna)'}

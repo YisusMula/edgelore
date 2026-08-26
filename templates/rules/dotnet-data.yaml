@@ -32,6 +32,12 @@ kinds:
 
   ef-migration:
     label: Migracion de EF Core
+    detect:
+      files: ["**/Migrations/*.cs"]
+      contains: ["Migration\\b"]
+      id:
+        strip_prefix: ["src/"]
+        strip_suffix: [".Designer.cs", ".cs"]
     checklist:
       - "Que tablas altera? Aristas writes."
       - "Es reversible? Una migracion que no baja limpia hay que saberlo ANTES de desplegar."

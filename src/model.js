@@ -175,8 +175,8 @@ export function validateNode(node, { source = 'hecho' } = {}) {
     if (edge.confidence && !CONFIDENCE[edge.confidence]) {
       fail(`${label}: confidence "${edge.confidence}" desconocida. Validas: ${Object.keys(CONFIDENCE).join(', ')}`);
     }
-    if (edge.source && !/^(human|rule:[\w.-]+|extractor:[\w.-]+)$/.test(edge.source)) {
-      fail(`${label}: source "${edge.source}" invalida. Usa human, rule:<id> o extractor:<id>`);
+    if (edge.source && !/^(human|rule:[\w.-]+|extractor:[\w.-]+|import:[\w.-]+)$/.test(edge.source)) {
+      fail(`${label}: source "${edge.source}" invalida. Usa human, rule:<id>, extractor:<id> o import:<id>`);
     }
     // Una arista implicita sin disparador es justo la que nadie sabra interpretar
     // dentro de seis meses, que es el caso que Edgelore existe para resolver.

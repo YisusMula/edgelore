@@ -11,6 +11,12 @@ name: .NET MAUI
 kinds:
   maui-page:
     label: Pagina (ContentPage / Shell page)
+    detect:
+      files: ["**/*Page.xaml.cs"]
+      contains: ["ContentPage|ShellContent"]
+      id:
+        strip_prefix: ["src/"]
+        strip_suffix: [".xaml.cs", ".cs"]
     implicit_edges:
       - member: ctor
         type: lifecycle
@@ -41,6 +47,11 @@ kinds:
 
   maui-viewmodel:
     label: ViewModel enlazado a una vista
+    detect:
+      files: ["**/*ViewModel.cs"]
+      id:
+        strip_prefix: ["src/"]
+        strip_suffix: [".cs"]
     implicit_edges:
       - member: ctor
         type: lifecycle
