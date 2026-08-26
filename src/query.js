@@ -199,7 +199,7 @@ function renderEdgeList(edges, direction, limit) {
   return lines;
 }
 
-export function renderNeighbourhood(result, { notes = true, limit = DEFAULT_LEVEL_LIMIT, maxAgeDays = DEFAULT_MAX_AGE_DAYS, now = Date.now(), sellable = true } = {}) {
+export function renderNeighbourhood(result, { notes = true, limit = DEFAULT_LEVEL_LIMIT, maxAgeDays = DEFAULT_MAX_AGE_DAYS, now = Date.now() } = {}) {
   const lines = [];
   const { id, node, outgoing, incoming } = result;
   // --all (limit <= 0) tambien levanta el tope del texto libre: quien lo pide
@@ -211,21 +211,20 @@ export function renderNeighbourhood(result, { notes = true, limit = DEFAULT_LEVE
     if (node.file) lines.push(`  archivo: ${node.file}`);
     if (node.summary) lines.push(`  ${completo ? node.summary : clamp(node.summary, MAX_INLINE)}`);
     if (node.tags?.length) lines.push(`  tags: ${node.tags.join(', ')}`);
-    if (node.verified?.commit) {
+    if (node.verified?.date) {
+      // Se muestra el commit cuando lo hay porque es lo unico accionable para
+      // una persona: `git show <commit>`. La huella es el mecanismo con el que
+      // `stale` compara, no algo que nadie vaya a teclear.
       const decay = decayLabel(node.verified, { maxAgeDays, now });
-      lines.push(
-        `  verificado: ${node.verified.commit}${node.verified.date ? ` (${node.verified.date})` : ''}` +
-          (decay ? `  <- ${decay}` : ''),
-      );
-    } else if (node.edges?.length && sellable) {
+      const sello = node.verified.commit
+        ? `${node.verified.commit} (${node.verified.date})`
+        : node.verified.date;
+      lines.push(`  verificado: ${sello}${decay ? `  <- ${decay}` : ''}`);
+    } else if (node.edges?.length) {
       // Un hecho que nadie confirmo nunca se lee igual de convencido que uno
-      // sellado ayer. Decirlo cuesta una linea.
-      //
-      // Salvo donde no hay control de versiones: alli `verify` no puede sellar
-      // nada, asi que el aviso saldria en el 100% de los nodos y sin ninguna
-      // forma de quitarlo. Un aviso que no se puede accionar solo ensena a
-      // ignorar los avisos. Se recuperara cuando el sello deje de depender de
-      // git y pase a ser una huella del contenido.
+      // sellado ayer. Decirlo cuesta una linea, y ahora es accionable en
+      // cualquier repositorio: `edgelore verify` sella con la huella del
+      // contenido y ya no necesita git.
       lines.push('  SIN VERIFICAR: nadie ha confirmado este hecho todavia.');
     }
   } else {
@@ -474,14 +473,14 @@ function decayedCount(result, index, { maxAgeDays, now }) {
   for (const level of result.levels) {
     for (const entry of level.entries) {
       const verified = index.nodes.get(entry.id)?.verified;
-      if (!verified?.commit) sinSellar.add(entry.id);
+      if (!verified?.date) sinSellar.add(entry.id);
       else if (decayLabel(verified, { maxAgeDays, now })) viejos.add(entry.id);
     }
   }
   return { viejos: viejos.size, sinSellar: sinSellar.size };
 }
 
-export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT, maxAgeDays = DEFAULT_MAX_AGE_DAYS, now = Date.now(), sellable = true } = {}) {
+export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT, maxAgeDays = DEFAULT_MAX_AGE_DAYS, now = Date.now() } = {}) {
   const lines = [`ALCANCE DE ${result.id}`];
 
   if (!result.known) {
@@ -554,11 +553,7 @@ export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT, maxAg
     lines.push('Listado recortado. Para verlo entero: --all (o --json para procesarlo).');
   }
 
-  const contados = decayedCount(result, index, { maxAgeDays, now });
-  const viejos = contados.viejos;
-  // Sin control de versiones nada lleva sello, asi que "sin verificar nunca"
-  // seria el total y no informaria de nada. Mismo motivo que en query.
-  const sinSellar = sellable ? contados.sinSellar : 0;
+  const { viejos, sinSellar } = decayedCount(result, index, { maxAgeDays, now });
   if (viejos || sinSellar) {
     const partes = [];
     if (viejos) partes.push(`${viejos} sin reverificar desde hace mas de ${Math.round(maxAgeDays / 30)} meses`);

@@ -84,8 +84,9 @@ ciego:
 | Que pasa si cambio esta clave de configuracion | **edgelore** |
 
 Trata cada hecho segun su etiqueta de confianza. `~SIN VERIFICAR` y `~probable`
-son pistas que hay que comprobar, no verdades. Si `edgelore stale` marca un hecho, el
-codigo cambio despues de verificarlo: leelo antes de fiarte.
+son pistas que hay que comprobar, no verdades. Si `edgelore stale` marca un
+hecho, el contenido del fichero ya no casa con la huella que se guardo al
+verificarlo: leelo antes de fiarte.
 
 Hay dos marcas mas que significan lo mismo -este hecho puede estar mintiendo-:
 

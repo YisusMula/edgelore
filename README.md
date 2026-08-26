@@ -78,6 +78,11 @@ está al día. Edgelore cubre lo que grep no puede ver:
 | ¿Quién escribe en esta tabla? | **edgelore** |
 | ¿Qué se rompe si cambio esta clave de config? | **edgelore** |
 
+**No necesita git.** Detecta que un hecho se ha quedado atrás comparando una
+huella del contenido del fichero, no el historial. Funciona igual en SVN,
+Mercurial, Perforce o un árbol exportado sin historia; donde hay git, además
+anota el commit para que tengas algo que teclear.
+
 **No es una red neuronal ni un índice vectorial.** Son ficheros Markdown con
 frontmatter y un CLI que los consulta. Sin embeddings, sin base de datos, sin
 API keys, sin telemetría, sin ninguna dependencia externa: nada sale de tu
@@ -203,8 +208,8 @@ Dicho ahora y no dentro de tres meses:
   primero lo que ya os ha hecho perder tiempo, no intentes cubrir el proyecto
   entero.
 - **Un hecho obsoleto es peor que ninguno**, porque se lee con confianza. Por eso
-  cada hecho lleva `confidence` y el commit en que se verificó, y por eso existe
-  `edgelore stale`. Pasado un año sin reverificar, las consultas dejan de
+  cada hecho lleva `confidence` y una huella del contenido que describe, y por
+  eso existe `edgelore stale`. Pasado un año sin reverificar, las consultas dejan de
   imprimir el sello a secas y añaden `<- sin reverificar desde hace N meses`: el
   índice no puede saber si un hecho sigue siendo cierto, pero sí puede dejar de
   aparentar que alguien lo ha comprobado hace poco. La disciplina no es opcional.
@@ -213,7 +218,7 @@ Dicho ahora y no dentro de tres meses:
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 132 pruebas).
+v0.1. El núcleo curado está completo y probado (`npm test`, 142 pruebas).
 
 Siguiente paso previsto: un extractor opcional basado en Roslyn que emita hechos
 en este mismo formato con `source: extractor:roslyn`, para poblar las aristas

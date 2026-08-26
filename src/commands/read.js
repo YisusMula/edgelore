@@ -35,7 +35,8 @@ import {
   DEFAULT_MAX_AGE_DAYS,
 } from '../query.js';
 import { loadRules, kindCatalog, renderKinds, checklistFor, renderChecklist } from '../rules.js';
-import { changedSince, filesChangedSince, isGitRepo, lastCommitFor, looksLikeGitRepo } from '../git.js';
+import { changedSince, filesChangedSince, isGitRepo, lastCommitFor } from '../git.js';
+import { fingerprintFile } from '../fingerprint.js';
 
 /**
  * Umbral de reverificacion en dias. Sin --max-age vale el de por defecto, que
@@ -70,7 +71,6 @@ export function cmdQuery(args, options) {
       notes: !options.brief,
       limit: options.all ? 0 : options.limit,
       maxAgeDays: maxAgeFrom(options),
-      sellable: looksLikeGitRepo(root),
     }),
   };
 }
@@ -110,7 +110,6 @@ export function cmdImpact(args, options) {
     output: renderImpact(result, index, {
       limit: options.all ? 0 : options.limit,
       maxAgeDays: maxAgeFrom(options),
-      sellable: looksLikeGitRepo(root),
     }),
   };
 }
@@ -213,7 +212,7 @@ export function cmdValidate(args, options) {
   if (options['max-age'] !== undefined) {
     const maxAgeDays = maxAgeFrom(options);
     for (const node of index.nodes.values()) {
-      if (!node.verified?.commit) continue;
+      if (!node.verified?.date) continue;
       const days = ageInDays(node.verified.date);
       if (days !== null && days >= maxAgeDays) caducados.push({ id: node.id, days });
     }
@@ -319,20 +318,44 @@ export function cmdPrune(args, options) {
  */
 export function cmdStale(args, options) {
   const root = requireStoreRoot();
-  if (!isGitRepo(root)) {
-    return { output: 'Este directorio no es un repositorio git; no se puede calcular la caducidad.', code: 1 };
-  }
   const index = loadIndex(root);
+  const git = isGitRepo(root);
   const stale = [];
   const unverified = [];
 
-  // Se agrupan los hechos por el commit en que se verificaron y se pregunta a
-  // git una vez por commit, no una por hecho: con miles de hechos la diferencia
-  // es de segundos a milisegundos, y esto corre en CI.
+  // La huella del contenido es el mecanismo; git solo enriquece.
+  //
+  // Antes era al reves y eso abria dos agujeros. Fuera de un repositorio git el
+  // comando se negaba a funcionar entero. Y dentro, `filesChangedSince`
+  // devuelve null cuando git no reconoce el commit del sello -lo que pasa en
+  // cuanto alguien hace squash al mergear-, y ese null se interpretaba como
+  // "ante la duda no marcar nada": los hechos verificados dejaban de
+  // comprobarse EN SILENCIO y `stale` respondia "todos al dia" porque no podia
+  // preguntar, no porque lo estuvieran.
   const porCommit = new Map();
   for (const node of index.nodes.values()) {
     if (!node.file) continue;
-    if (!node.verified?.commit) {
+    if (!node.verified?.date) {
+      unverified.push(node);
+      continue;
+    }
+    if (node.verified.fingerprint) {
+      const actual = fingerprintFile(root, node.file);
+      // null = el fichero ya no existe. Eso no es caducidad, es
+      // desincronizacion, y de eso ya informan `validate` y `prune`.
+      if (actual && actual !== node.verified.fingerprint) {
+        stale.push({
+          id: node.id,
+          file: node.file,
+          since: node.verified.commit ?? node.verified.date,
+          last: git ? lastCommitFor(root, node.file) : null,
+        });
+      }
+      continue;
+    }
+    // Hecho antiguo, sellado antes de que existieran las huellas: se cae al
+    // mecanismo de git, que es el unico dato que tiene.
+    if (!node.verified.commit || !git) {
       unverified.push(node);
       continue;
     }
@@ -340,10 +363,10 @@ export function cmdStale(args, options) {
     porCommit.get(node.verified.commit).push(node);
   }
 
+  // Se pregunta a git una vez por commit y no una por hecho: con miles de
+  // hechos la diferencia es de segundos a milisegundos, y esto corre en CI.
   for (const [commit, nodes] of porCommit) {
     const cambiados = filesChangedSince(root, commit);
-    // null = git no pudo responder (commit desconocido tras un rebase, por
-    // ejemplo). Ante la duda no se marca nada, como hacia changedSince.
     if (!cambiados) continue;
     for (const node of nodes) {
       if (!cambiados.has(node.file)) continue;
@@ -357,7 +380,7 @@ export function cmdStale(args, options) {
   const lines = [];
   if (stale.length) {
     lines.push(`${stale.length} hecho(s) por revisar (el codigo cambio despues de verificarlos):`);
-    stale.forEach((entry) => lines.push(`  ${entry.id}\n    ${entry.file}  ${entry.since} -> ${entry.last}`));
+    stale.forEach((entry) => lines.push(`  ${entry.id}\n    ${entry.file}  ${entry.since}${entry.last ? ` -> ${entry.last}` : ''}`));
     lines.push('', 'Revisalo y confirma con: edgelore verify <id>');
   }
   if (unverified.length) {

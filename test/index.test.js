@@ -7,11 +7,12 @@ import path from 'node:path';
 import { loadIndex, writeNode, readNode, findStoreRoot, incomingEdges, danglingIds, classifyDangling } from '../src/store.js';
 import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact, moduleOf, workList, renderWorkList, didYouMean, suggest, clamp, ageInDays, formatAge, decayLabel } from '../src/query.js';
 import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
+import { fingerprintOf, normalizeContent, fingerprintFile } from '../src/fingerprint.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
-import { parseEdgeFlag, cmdAdd, cmdLink, cmdRename } from '../src/commands/write.js';
+import { parseEdgeFlag, cmdAdd, cmdLink, cmdRename, cmdVerify } from '../src/commands/write.js';
 import { cmdInit, cmdUninstall, cmdRules, detectRuleSets } from '../src/commands/init.js';
-import { cmdValidate, cmdPrune } from '../src/commands/read.js';
+import { cmdValidate, cmdPrune, cmdStale } from '../src/commands/read.js';
 import { parseArgs } from '../bin/edgelore.js';
 
 /** Repositorio temporal con Edgelore instalado, para pruebas aisladas. */
@@ -1128,27 +1129,88 @@ test('validate calla sobre la antiguedad salvo que se le pida', () => {
   });
 });
 
-test('no se marca SIN VERIFICAR donde verify no puede sellar nada', () => {
-  // En un repositorio sin control de versiones, verificationStamp no sella y
-  // `edgelore verify` sale con codigo 1: el aviso saldria en el 100% de los
-  // nodos sin ninguna forma de quitarlo. Un aviso que no se puede accionar solo
-  // ensena a ignorar los avisos.
-  const root = sandbox();
-  writeNode(root, { id: 'A', edges: [{ to: 'B', type: 'calls' }] });
-  const result = neighbourhood(loadIndex(root), 'A');
-  // Ojo con la asercion: `~SIN VERIFICAR` es tambien la marca de confianza de
-  // una arista, asi que hay que mirar la frase del nodo, no la subcadena suelta.
-  const marca = 'SIN VERIFICAR: nadie ha confirmado';
-  assert.ok(renderNeighbourhood(result).includes(marca), 'con git si se avisa');
-  assert.ok(!renderNeighbourhood(result, { sellable: false }).includes(marca));
+// --- Huella del contenido --------------------------------------------------
+//
+// El commit era el MECANISMO para detectar que un hecho se quedo atras, y era
+// un mal mecanismo: obligaba a git y se evaporaba al reescribir la historia.
+// Ahora el mecanismo es la huella del fichero y git solo enriquece.
+
+test('la huella ignora los finales de linea y el BOM', () => {
+  // Sin esto, un equipo mixto Windows/Linux veria TODOS los hechos caducados al
+  // cambiar de maquina: `core.autocrlf=true` materializa el arbol con CRLF.
+  const lf = fingerprintOf(normalizeContent(Buffer.from('a\nb\n', 'utf8')));
+  const crlf = fingerprintOf(normalizeContent(Buffer.from('a\r\nb\r\n', 'utf8')));
+  const bom = fingerprintOf(normalizeContent(Buffer.from('﻿a\nb\n', 'utf8')));
+  assert.equal(lf, crlf);
+  assert.equal(lf, bom);
+  assert.match(lf, /^sha256:[0-9a-f]{16}$/);
 });
 
-test('impact tampoco cuenta los sin sellar cuando no hay con que sellar', () => {
-  const root = sandbox();
-  writeNode(root, { id: 'Dep', edges: [{ to: 'Hub', type: 'calls' }] });
-  writeNode(root, { id: 'Hub', edges: [] });
-  const index = loadIndex(root);
-  const result = impact(index, 'Hub');
-  assert.match(renderImpact(result, index), /sin verificar nunca/);
-  assert.ok(!renderImpact(result, index, { sellable: false }).includes('sin verificar nunca'));
+test('la huella si cambia cuando cambia el contenido', () => {
+  assert.notEqual(
+    fingerprintOf(normalizeContent(Buffer.from('a\n'))),
+    fingerprintOf(normalizeContent(Buffer.from('b\n'))),
+  );
+});
+
+test('verify sella con la huella en un repositorio sin git', () => {
+  // Antes salia con codigo 1 diciendo "esto no es un repositorio git", asi que
+  // fuera de git ningun hecho llevaba sello y `stale` no podia decir nada.
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'class A {}\n');
+    cmdAdd(['Erp.A'], { file: 'src/A.cs' });
+    const resultado = cmdVerify(['Erp.A']);
+    assert.equal(resultado.code ?? 0, 0, resultado.output);
+    const node = readNode(root, 'Erp.A');
+    assert.match(node.verified.fingerprint, /^sha256:[0-9a-f]{16}$/);
+    assert.equal(node.verified.commit, undefined, 'sin git no hay commit que anotar');
+  });
+});
+
+test('stale detecta el cambio por huella, sin preguntar a git', () => {
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'class A {}\n');
+    cmdAdd(['Erp.A'], { file: 'src/A.cs' });
+
+    assert.equal(cmdStale([], {}).code ?? 0, 0, 'recien sellado, nada que revisar');
+
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'class A { void Nuevo() {} }\n');
+    const resultado = cmdStale([], {});
+    assert.equal(resultado.code, 1);
+    assert.match(resultado.output, /Erp\.A/);
+  });
+});
+
+test('stale no confunde un fichero borrado con un hecho caducado', () => {
+  // Eso es desincronizacion, y de eso informan validate y prune.
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'class A {}\n');
+    cmdAdd(['Erp.A'], { file: 'src/A.cs' });
+    fs.rmSync(path.join(root, 'src', 'A.cs'));
+    assert.equal(cmdStale([], {}).code ?? 0, 0, cmdStale([], {}).output);
+  });
+});
+
+test('un hecho sellado solo con commit sigue siendo valido', () => {
+  // Compatibilidad: los indices escritos antes de que existieran las huellas no
+  // pueden quedar invalidados de golpe.
+  const problemas = validateNode({ id: 'A', verified: { commit: 'abc1234', date: '2026-01-01' } });
+  assert.deepEqual(problemas, []);
+});
+
+test('una huella con formato invalido si rompe el esquema', () => {
+  const problemas = validateNode({ id: 'A', verified: { fingerprint: 'sha1:cosas', date: '2026-01-01' } });
+  assert.equal(problemas.length, 1);
+  assert.match(problemas[0], /fingerprint invalida/);
+});
+
+test('las claves del sello salen siempre en el mismo orden', () => {
+  const verified = normalizeNode({
+    id: 'A',
+    verified: { date: '2026-01-01', by: 'a@b.c', commit: 'abc1234', fingerprint: 'sha256:0123456789abcdef' },
+  }).verified;
+  assert.deepEqual(Object.keys(verified), ['fingerprint', 'commit', 'date', 'by']);
 });

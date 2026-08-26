@@ -16,8 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # edgelore stale necesita el historial
+        # No hace falta fetch-depth: 0. `edgelore stale` compara huellas del
+        # contenido, no el historial; git solo se usa para anotar que commit
+        # cambio el fichero, y eso degrada limpiamente si no esta.
       - uses: actions/setup-node@v4
         with:
           node-version: 20

@@ -13,6 +13,7 @@ import { loadIndex, readNode, requireStoreRoot, writeNode, nodePath } from '../s
 import { normalizeEdge, validateNode, isValidId, EDGE_TYPES, CONFIDENCE } from '../model.js';
 import { loadRules, kindCatalog, implicitEdgesFor, checklistFor, renderChecklist } from '../rules.js';
 import { headCommit, currentUser, isGitRepo } from '../git.js';
+import { fingerprintFile } from '../fingerprint.js';
 
 /** Parsea `--edge destino:tipo:nota` en una arista normalizada. */
 export function parseEdgeFlag(raw) {
@@ -36,14 +37,30 @@ export function parseEdgeFlag(raw) {
   return edge;
 }
 
-function verificationStamp(root, options) {
+/**
+ * Sella un hecho como comprobado ahora.
+ *
+ * El mecanismo es la huella del fichero que el hecho describe; git solo
+ * enriquece. Antes era al reves y eso dejaba sin sello -y por tanto fuera del
+ * alcance de `stale`- todo hecho escrito fuera de un repositorio git.
+ *
+ * Un nodo sin fichero (una tabla, una clave de configuracion, un disparador
+ * externo) no tiene contenido que resumir: se sella igual con la fecha, porque
+ * "alguien afirmo esto el dia tal" sigue siendo informacion, aunque `stale` no
+ * pueda comprobarlo despues.
+ */
+function verificationStamp(root, options, file) {
   if (options.unverified) return undefined;
-  if (!isGitRepo(root)) return undefined;
-  const commit = headCommit(root);
-  if (!commit) return undefined;
-  const stamp = { commit, date: new Date().toISOString().slice(0, 10) };
-  const by = currentUser(root);
-  if (by) stamp.by = by;
+  const stamp = {};
+  const fingerprint = fingerprintFile(root, file);
+  if (fingerprint) stamp.fingerprint = fingerprint;
+  if (isGitRepo(root)) {
+    const commit = headCommit(root);
+    if (commit) stamp.commit = commit;
+    const by = currentUser(root);
+    if (by) stamp.by = by;
+  }
+  stamp.date = new Date().toISOString().slice(0, 10);
   return stamp;
 }
 
@@ -92,7 +109,7 @@ export function cmdAdd(args, options) {
   }
   node.edges = edges.map(normalizeEdge);
 
-  const stamp = verificationStamp(root, options);
+  const stamp = verificationStamp(root, options, node.file);
   if (stamp) node.verified = stamp;
 
   const problems = validateNode(node, { source: id });
@@ -150,7 +167,7 @@ ${Object.entries(EDGE_TYPES).map(([key, help]) => `  ${key.padEnd(11)} ${help}`)
   edges.push(edge);
   node.edges = edges;
 
-  const stamp = verificationStamp(root, options);
+  const stamp = verificationStamp(root, options, node.file);
   if (stamp) node.verified = stamp;
 
   const problems = validateNode(node, { source: from });
@@ -173,15 +190,22 @@ export function cmdVerify(args) {
   const root = requireStoreRoot();
   const existing = readNode(root, id);
   if (!existing) return { output: `No existe ningun hecho con id "${id}".`, code: 1 };
-  if (!isGitRepo(root)) return { output: 'Este directorio no es un repositorio git.', code: 1 };
 
   const node = { ...existing };
   const notes = node.notes ?? '';
   delete node.notes;
   delete node._file;
-  node.verified = verificationStamp(root, {});
+  node.verified = verificationStamp(root, {}, node.file);
   writeNode(root, node, notes);
-  return { output: `${id} verificado en ${node.verified.commit} (${node.verified.date}).` };
+
+  // Se dice con que ha quedado sellado, porque no siempre es lo mismo: sin
+  // fichero no hay huella, y fuera de git no hay commit.
+  const sello = node.verified.fingerprint
+    ? `huella ${node.verified.fingerprint}`
+    : node.verified.commit
+      ? `commit ${node.verified.commit}`
+      : 'solo fecha (sin fichero ni git: `stale` no podra comprobarlo)';
+  return { output: `${id} verificado: ${sello} (${node.verified.date}).` };
 }
 
 export function cmdRemove(args, options) {

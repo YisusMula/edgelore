@@ -9,8 +9,6 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
 
 function git(root, args) {
   try {
@@ -62,16 +60,4 @@ export function filesChangedSince(root, commit) {
   const out = git(root, ['log', '-z', '--name-only', '--format=', `${commit}..HEAD`]);
   if (out === null) return null;
   return new Set(out.split('\0').map((line) => line.trim()).filter(Boolean));
-}
-
-/**
- * Comprobacion barata de si hay control de versiones, SIN lanzar un proceso.
- *
- * `isGitRepo` invoca a git, y esto se consulta al renderizar cada consulta -que
- * es el camino caliente, el mismo que recorre el hook en cada edicion-. Para
- * decidir si merece la pena imprimir un aviso basta con mirar si existe `.git`
- * (fichero en los worktrees y submodulos, directorio en el resto).
- */
-export function looksLikeGitRepo(root) {
-  return fs.existsSync(path.join(root, '.git'));
 }

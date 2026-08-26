@@ -26,6 +26,7 @@ edges:
     source: human
     at: src/Ui/DetallePage.xaml.cs:18
 verified:
+  fingerprint: "sha256:9f2c1a4b8e6d3057"
   commit: a3f9c21
   date: 2026-08-19
   by: alguien@empresa.com
@@ -46,7 +47,37 @@ tiene el Id cuando se construye la página. Cambiarlo rompe la vuelta atrás.
 | `summary` | no | Una línea, máximo 300 caracteres. El detalle va en el cuerpo. |
 | `tags` | no | Lista para agrupar por área funcional. |
 | `edges` | no | Aristas salientes. |
-| `verified` | no | `commit`, `date` y opcionalmente `by`. Base de `edgelore stale`. |
+| `verified` | no | Sello de comprobación. Solo `date` es obligatorio dentro. Base de `edgelore stale`. |
+
+### El sello `verified`
+
+| Subcampo | Obligatorio | Descripción |
+|---|---|---|
+| `date` | sí | Cuándo se comprobó. Alimenta el decaimiento de la confianza. |
+| `fingerprint` | no | `sha256:` + 16 hex del contenido del fichero. **El mecanismo** con el que `stale` detecta que el código cambió. |
+| `commit` | no | Commit de HEAD al sellar. Enriquecimiento: da algo que teclear (`git show`). |
+| `by` | no | Quién lo comprobó. |
+
+**La huella es el mecanismo; git solo enriquece.** Al principio era al revés y
+eso abría dos agujeros. Fuera de un repositorio git no se sellaba nada, así que
+`stale` no podía decir nada en SVN, Mercurial, Perforce o un árbol exportado sin
+historia. Y dentro de git, `filesChangedSince` devuelve `null` cuando no
+reconoce el commit del sello — lo que ocurre **en cuanto alguien hace squash al
+mergear** — y ese `null` se interpretaba como «ante la duda, no marcar nada»:
+los hechos verificados dejaban de comprobarse en silencio y `stale` respondía
+«todos al día» porque no podía preguntar, no porque lo estuvieran.
+
+La huella se calcula sobre el contenido **normalizado**: CRLF→LF y sin BOM. Sin
+eso, un equipo mixto Windows/Linux vería todos los hechos caducados al cambiar
+de máquina, porque `core.autocrlf=true` materializa el árbol con CRLF.
+
+Son 16 caracteres hexadecimales y no los 64 porque aquí no hay un adversario
+intentando colisionar un hash: hay un fichero que cambia o no cambia. 64 bits
+sobran, y el resto solo haría más ruidoso cada diff.
+
+Un nodo sin `file` (una tabla, una clave de configuración) no tiene contenido
+que resumir: se sella igual con la fecha, porque «alguien afirmó esto el día
+tal» sigue siendo información, aunque `stale` no pueda comprobarlo después.
 
 ## Campos de una arista
 
@@ -91,8 +122,9 @@ conflictos de merge cuando dos personas trabajan a la vez.
 **`confidence` y `verified` no son burocracia.** El riesgo real de un índice
 curado no es quedarse corto, es **mentir**: un hecho que era cierto hace tres
 meses se lee hoy con la misma confianza que uno recién comprobado. `confidence`
-dice cuánto se comprobó; `verified.commit` permite a `edgelore stale` detectar que el
-código cambió después. Sin ambos campos el índice se pudre en silencio.
+dice cuánto se comprobó; `verified.fingerprint` permite a `edgelore stale`
+detectar que el código cambió después. Sin ambos campos el índice se pudre en
+silencio.
 
 **La confianza decae al mostrarse, no en el fichero.** Nadie puede recalcular si
 un hecho sigue siendo cierto sin mirarlo, así que Edgelore no degrada
@@ -103,11 +135,8 @@ de los dependientes alcanzados están en esa situación, contados por nodo y no
 por arista. Un nodo con aristas y sin `verified` se marca `SIN VERIFICAR`. No
 se añade ningún campo: el dato ya estaba en `verified.date`.
 
-Ninguna de las dos marcas aparece donde no hay control de versiones:
-`verificationStamp` no sella sin git y `edgelore verify` no puede funcionar
-allí, así que el aviso saldría en el 100% de los nodos sin forma de quitarlo —
-que es la manera exacta de enseñar a ignorar los avisos. Volverán a aparecer
-cuando el sello deje de depender de git y pase a ser una huella del contenido.
+Ambas marcas son accionables en cualquier repositorio: `edgelore verify` sella
+con la huella del contenido y no necesita git.
 
 **El texto libre se acota al renderizar.** `summary` lo limita el esquema a 300
 caracteres, pero `note`, `trigger`, `at` y el cuerpo del markdown (`notes`) no

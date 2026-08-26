@@ -16,7 +16,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { findStoreRoot, loadIndex } from '../store.js';
 import { impact, renderImpact } from '../query.js';
-import { changedSince, isGitRepo, looksLikeGitRepo } from '../git.js';
+import { changedSince, isGitRepo } from '../git.js';
+import { fingerprintFile } from '../fingerprint.js';
 
 const MAX_SUGGESTIONS = 6;
 
@@ -56,9 +57,18 @@ export function buildNotice(root, index, files, { git = false } = {}) {
   const lines = [];
 
   if (known.length) {
-    const suspect = known.filter(
-      (node) => !node.verified?.commit || (git && changedSince(root, node.verified.commit, node.file)),
-    );
+    // Sospechoso = nunca sellado, o el contenido ya no casa con el sello. La
+    // huella responde a esto sin preguntar a git y sin depender de que el
+    // commit del sello siga existiendo; el camino por commit queda solo para
+    // los hechos antiguos, que no tienen huella con la que comparar.
+    const suspect = known.filter((node) => {
+      if (!node.verified?.date) return true;
+      if (node.verified.fingerprint) {
+        const actual = fingerprintFile(root, node.file);
+        return actual !== null && actual !== node.verified.fingerprint;
+      }
+      return git && node.verified.commit ? changedSince(root, node.verified.commit, node.file) : false;
+    });
     lines.push(`Edgelore: este fichero tiene ${known.length} hecho(s) registrados en el indice.`);
     known.slice(0, MAX_SUGGESTIONS).forEach((node) => {
       const edges = node.edges?.length ?? 0;
@@ -113,7 +123,7 @@ export function buildImpactNotice(root, index, files, { maxDepth = 3 } = {}) {
   // que nadie lo haya pedido, asi que da la senal y deja el detalle a demanda.
   const lines = ['Edgelore: lo que vas a editar tiene dependencias registradas.'];
   for (const result of affected.slice(0, HOOK_MAX_NODES)) {
-    lines.push('', renderImpact(result, index, { limit: HOOK_LEVEL_LIMIT, sellable: looksLikeGitRepo(root) }));
+    lines.push('', renderImpact(result, index, { limit: HOOK_LEVEL_LIMIT }));
   }
   if (affected.length > HOOK_MAX_NODES) {
     const resto = affected.slice(HOOK_MAX_NODES);

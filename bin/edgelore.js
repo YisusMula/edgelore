@@ -68,7 +68,7 @@ const COMMANDS = {
   impact: { run: cmdImpact, help: 'Que depende de esto. --files da la lista de sitios que revisar.' },
   find: { run: cmdFind, help: 'Busca hechos por texto.' },
   path: { run: cmdPath, help: 'Camino mas corto conocido entre dos nodos.' },
-  verify: { run: cmdVerify, help: 'Sella un hecho como comprobado en el commit actual.' },
+  verify: { run: cmdVerify, help: 'Sella un hecho como comprobado con el contenido actual.' },
   rename: { run: cmdRename, help: 'Cambia el id de un nodo y reapunta todo lo que le referenciaba.' },
   remove: { run: cmdRemove, help: 'Elimina un hecho.' },
   validate: { run: cmdValidate, help: 'Comprueba la coherencia del indice. Pensado para CI.' },

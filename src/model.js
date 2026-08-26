@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { FINGERPRINT_PATTERN } from './fingerprint.js';
 
 /**
  * Esquema de un hecho de Edgelore y su validacion.
@@ -40,6 +41,13 @@ export const CONFIDENCE = {
 /** Orden canonico de claves: garantiza diffs minimos y estables en git. */
 const NODE_KEY_ORDER = ['id', 'kind', 'file', 'lang', 'summary', 'tags', 'edges', 'verified'];
 const EDGE_KEY_ORDER = ['to', 'type', 'confidence', 'source', 'trigger', 'at', 'note'];
+/**
+ * Orden canonico dentro de `verified`. El serializador respeta el orden de
+ * insercion, asi que sin esto dos personas que sellan el mismo hecho producen
+ * el mismo contenido en distinto orden y el diff muestra una reordenacion en
+ * vez del cambio real.
+ */
+const VERIFIED_KEY_ORDER = ['fingerprint', 'commit', 'date', 'by'];
 
 const ID_PATTERN = /^[A-Za-z_][\w.+-]*(?:\/[\w.+-]+)*$/;
 
@@ -84,6 +92,18 @@ export function normalizeEdge(edge) {
   return out;
 }
 
+/** Ordena las claves del sello de verificacion; devuelve null si no hay sello. */
+export function normalizeVerified(verified) {
+  if (!verified || typeof verified !== 'object' || Array.isArray(verified)) return null;
+  const out = {};
+  for (const key of VERIFIED_KEY_ORDER) {
+    if (verified[key] !== undefined && verified[key] !== null && verified[key] !== '') {
+      out[key] = verified[key];
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 /** Normaliza un hecho completo: claves ordenadas, aristas ordenadas y sin duplicados. */
 export function normalizeNode(node) {
   const edges = asArray(node.edges)
@@ -103,7 +123,10 @@ export function normalizeNode(node) {
   const out = {};
   for (const key of NODE_KEY_ORDER) {
     if (key === 'edges') out.edges = deduped;
-    else if (key === 'tags') {
+    else if (key === 'verified') {
+      const verified = normalizeVerified(node.verified);
+      if (verified) out.verified = verified;
+    } else if (key === 'tags') {
       const tags = asArray(node.tags);
       if (tags.length) out.tags = [...new Set(tags)].sort();
     } else if (node[key] !== undefined && node[key] !== null && node[key] !== '') {
@@ -167,9 +190,20 @@ export function validateNode(node, { source = 'hecho' } = {}) {
 
   if (node.verified !== undefined) {
     if (typeof node.verified !== 'object' || Array.isArray(node.verified) || node.verified === null) {
-      fail('verified debe ser un mapa con commit y date');
-    } else if (!node.verified.commit) {
-      fail('verified necesita el commit en el que se comprobo el hecho');
+      fail('verified debe ser un mapa con al menos date');
+    } else {
+      // Lo unico obligatorio es la fecha: es lo que da sentido al sello ("una
+      // persona afirmo esto el dia tal") y lo que alimenta el decaimiento de la
+      // confianza. `fingerprint` es el mecanismo con el que `stale` comprueba
+      // si el contenido cambio y `commit` el de los hechos escritos antes de
+      // que existiera; ambos son opcionales porque un nodo puede no tener
+      // fichero que resumir -una tabla, una clave de configuracion- y un
+      // repositorio puede no usar git. Exigir cualquiera de los dos invalidaria
+      // hechos legitimos o volveria a atar la herramienta a git.
+      if (node.verified.fingerprint && !FINGERPRINT_PATTERN.test(node.verified.fingerprint)) {
+        fail(`verified.fingerprint invalida ("${node.verified.fingerprint}"). Formato: sha256:<16 hex>`);
+      }
+      if (!node.verified.date) fail('verified necesita la fecha en que se comprobo');
     }
   }
 
