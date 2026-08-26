@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { requiereSymlinks } from './entorno.js';
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'edgelore.js');
 
@@ -37,18 +38,18 @@ test('el binario responde a --version ejecutado directamente', () => {
   assert.match(run(BIN, ['--version']), /^\d+\.\d+\.\d+/);
 });
 
-test('el binario responde igual invocado a traves de un symlink', () => {
+test('el binario responde igual invocado a traves de un symlink', requiereSymlinks(), () => {
   // Regresion: aqui el CLI instalado no imprimia nada y salia con codigo 0.
   assert.match(run(symlinkedBin(), ['--version']), /^\d+\.\d+\.\d+/);
 });
 
-test('help lista los comandos a traves del symlink', () => {
+test('help lista los comandos a traves del symlink', requiereSymlinks(), () => {
   const salida = run(symlinkedBin(), ['help']);
   assert.match(salida, /impact/);
   assert.match(salida, /uninstall/);
 });
 
-test('un comando desconocido falla con codigo distinto de cero', () => {
+test('un comando desconocido falla con codigo distinto de cero', requiereSymlinks(), () => {
   let code = 0;
   try {
     execFileSync(process.execPath, [symlinkedBin(), 'comando-inventado'], { stdio: 'pipe' });
@@ -58,7 +59,7 @@ test('un comando desconocido falla con codigo distinto de cero', () => {
   assert.equal(code, 2, 'un comando invalido debe fallar, no fingir exito');
 });
 
-test('el flujo completo funciona a traves del symlink', () => {
+test('el flujo completo funciona a traves del symlink', requiereSymlinks(), () => {
   const bin = symlinkedBin();
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'edgelore-repo-'));
   fs.mkdirSync(path.join(repo, 'src'));
@@ -100,7 +101,12 @@ test('una salida grande no se corta al pasar por una tuberia', () => {
   // Hace falta una tuberia REAL con un consumidor que no drena al vuelo: con
   // execFileSync el padre lee segun el hijo escribe y el bufer nunca se llena,
   // de modo que el fallo no se reproduce. Una tuberia de shell si lo hace.
-  const salida = execSync(`"${process.execPath}" "${BIN}" impact Objetivo --files | cat`, {
+  //
+  // El consumidor es node y no `cat` porque `cat` no existe en cmd.exe, que es
+  // el shell que usa execSync en Windows: la prueba fallaba alli por el
+  // consumidor, no por lo que pretende comprobar.
+  const paso = `"${process.execPath}" -e "process.stdin.pipe(process.stdout)"`;
+  const salida = execSync(`"${process.execPath}" "${BIN}" impact Objetivo --files | ${paso}`, {
     cwd: repo,
     encoding: 'utf8',
     maxBuffer: 32 * 1024 * 1024,

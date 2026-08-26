@@ -25,6 +25,14 @@ kinds:
 
   hosted-service:
     label: IHostedService / BackgroundService
+    detect:
+      # Por contenido y no por nombre: aqui la convencion fiable es heredar de
+      # BackgroundService, no como se llame el fichero.
+      files: ["**/*.cs"]
+      contains: [":\\s*(BackgroundService|IHostedService)\\b"]
+      id:
+        strip_prefix: ["src/"]
+        strip_suffix: [".cs"]
     implicit_edges:
       - member: StartAsync
         type: lifecycle

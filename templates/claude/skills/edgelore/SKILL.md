@@ -139,6 +139,18 @@ deja de servir muy rapido.
 edgelore rename Erp.Ui.ViejaPage Erp.Ui.NuevaPage
 ```
 
+Para poblar el indice de golpe hay dos ordenes, y las dos producen CANDIDATOS
+sin verificar, no hechos comprobados:
+
+- `edgelore scan` propone ficheros que casan con los detectores de las reglas.
+  Los ids salen derivados de la ruta: revisalos antes de aplicar, y avisa al
+  usuario de que hay que revisarlos. `edgelore scan <kind> --apply` los escribe.
+- `edgelore import cron <fichero>` (o `systemd`) trae lo que ya esta declarado
+  fuera del codigo. El destino de cada arista es una deduccion del comando.
+
+En ambos casos, lo que sale queda `~SIN VERIFICAR` a proposito. Si vas a apoyar
+un cambio en uno de esos hechos, comprueba antes que es cierto.
+
 Si te piden por donde empezar a rellenar el indice, o que hay que revisar,
 `edgelore suggest` lo responde: lo mas tocado sin ningun hecho, y los hechos con
 mas dependientes que nadie confirma desde hace tiempo.

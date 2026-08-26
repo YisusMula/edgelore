@@ -7,10 +7,24 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Windows y macOS no son decoracion: este proyecto se usa sobre todo en
+    # equipos .NET, y una suite que solo se puede ver en verde en Linux
+    # normaliza "unos cuantos en rojo", que es exactamente el estado en el que
+    # un CI deja de mirarse. Ademas los dos tienen sistemas de ficheros que no
+    # distinguen mayusculas, un caso que el codigo trata a proposito.
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Sin esto, el primer sistema que falle cancela los demas y se arregla un
+      # fallo por ronda en vez de verlos todos.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
+          # La version minima que declara package.json, no la ultima: si la
+          # suite solo pasa en la ultima, el minimo declarado es mentira.
           node-version: 20
       - run: npm test

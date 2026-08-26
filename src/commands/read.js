@@ -37,7 +37,9 @@ import {
   formatAge,
   DEFAULT_MAX_AGE_DAYS,
 } from '../query.js';
-import { loadRules, kindCatalog, renderKinds, checklistFor, renderChecklist } from '../rules.js';
+import { loadRules, kindCatalog, renderKinds, checklistFor, renderChecklist, implicitEdgesFor } from '../rules.js';
+import { scanCandidates } from '../scan.js';
+import { validateNode } from '../model.js';
 import { changedSince, filesChangedSince, isGitRepo, lastCommitFor, churn } from '../git.js';
 import { fingerprintFile } from '../fingerprint.js';
 import { checkAnchor, withLine } from '../anchor.js';
@@ -649,5 +651,99 @@ export function cmdSuggest(args, options) {
     lines.push(`  Confirmalos con: edgelore verify ${podridos[0].id}`);
   }
 
+  return { output: lines.join('\n') };
+}
+
+/**
+ * Propone hechos a partir de los detectores de las reglas.
+ *
+ * Por defecto SOLO LISTA. `--apply` exige ademas un kind concreto: dejar que
+ * una sola orden registre candidatos de todas las reglas a la vez es la forma
+ * de acabar con tres mil nodos que nadie ha mirado, y un indice inflado de
+ * conjeturas es peor que uno vacio -miente sobre su propia cobertura y hace que
+ * `stats` deje de significar nada-.
+ */
+export function cmdScan(args, options) {
+  const root = requireStoreRoot();
+  const index = loadIndex(root);
+  const catalog = kindCatalog(loadRules(root));
+  const kind = args[0] ?? null;
+
+  if (kind && !catalog.has(kind)) {
+    const conocidos = [...catalog.keys()].sort().join(', ');
+    return { output: `El kind "${kind}" no lo declara ninguna regla activa.\nDisponibles: ${conocidos || '(ninguno)'}`, code: 1 };
+  }
+  if (options.apply && !kind) {
+    return {
+      output: 'Para escribir hace falta decir que kind: edgelore scan <kind> --apply\n'
+        + 'Registrar de golpe los candidatos de todas las reglas llenaria el indice de\n'
+        + 'conjeturas que nadie ha mirado, y eso hace mas dano que tenerlo vacio.',
+      code: 1,
+    };
+  }
+
+  const resultados = scanCandidates(root, catalog, index, { kind });
+  if (options.json) return { output: JSON.stringify(resultados, null, 2) };
+
+  if (!resultados.length) {
+    const conDetector = [...catalog.values()].filter((d) => d.detect?.files).length;
+    return {
+      output: conDetector
+        ? 'Ningun fichero nuevo casa con los detectores de las reglas activas.'
+        : 'Ninguna regla activa declara detectores. Anade un bloque `detect` en .edgelore/rules/*.yaml\n'
+          + '(ver docs/RULES.md); sin el, `scan` no tiene con que buscar.',
+    };
+  }
+
+  if (!options.apply) {
+    const lines = [];
+    for (const resultado of resultados) {
+      const total = resultado.nuevos.length + resultado.yaCubiertos;
+      lines.push(`${resultado.kind}  (regla ${resultado.ruleId}): ${resultado.nuevos.length} sin hecho de ${total} que casan`);
+      resultado.nuevos.slice(0, 10).forEach((c) => lines.push(`  ${c.id.padEnd(40)} ${c.file}`));
+      if (resultado.nuevos.length > 10) lines.push(`  ... y ${resultado.nuevos.length - 10} mas`);
+      lines.push('');
+    }
+    lines.push('Los ids salen derivados de la ruta: MIRALOS antes de aplicar. Se ajustan');
+    lines.push('con el bloque `detect.id` de la regla (strip_prefix, strip_suffix, prefix).');
+    lines.push(`Cuando cuadren: edgelore scan ${kind ?? '<kind>'} --apply`);
+    return { output: lines.join('\n') };
+  }
+
+  // --apply: se escriben como conjeturas, nunca como hechos comprobados.
+  const resultado = resultados[0];
+  const escritos = [];
+  const chocan = [];
+  for (const candidato of resultado.nuevos) {
+    if (index.nodes.has(candidato.id)) {
+      chocan.push(candidato);
+      continue;
+    }
+    const node = {
+      id: candidato.id,
+      kind: resultado.kind,
+      file: candidato.file,
+      edges: implicitEdgesFor(catalog, candidato.id, resultado.kind),
+    };
+    const problems = validateNode(node, { source: candidato.id });
+    if (problems.length) {
+      chocan.push({ ...candidato, motivo: problems[0] });
+      continue;
+    }
+    writeNode(root, node);
+    escritos.push(candidato);
+  }
+
+  const lines = [`${escritos.length} hecho(s) registrados como candidatos del kind "${resultado.kind}".`];
+  escritos.slice(0, 10).forEach((c) => lines.push(`  ${c.id.padEnd(40)} ${c.file}`));
+  if (escritos.length > 10) lines.push(`  ... y ${escritos.length - 10} mas`);
+  if (chocan.length) {
+    lines.push('', `${chocan.length} omitido(s) porque el id ya existe o no es valido:`);
+    chocan.slice(0, 10).forEach((c) => lines.push(`  ${c.id}${c.motivo ? `  (${c.motivo})` : ''}`));
+  }
+  lines.push('');
+  lines.push('Las aristas del kind se han aplicado, pero NADIE ha comprobado estos hechos:');
+  lines.push('quedan sin verificar a proposito. Confirma los que uses con `edgelore verify`,');
+  lines.push('y borra con `edgelore remove` los que el detector haya cogido por error.');
   return { output: lines.join('\n') };
 }

@@ -17,7 +17,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/index.test.js test/cli.test.js test/frontmatter.test.js"
   },
   "keywords": [
     "knowledge-graph",
