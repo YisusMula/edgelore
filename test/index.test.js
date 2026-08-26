@@ -8,11 +8,12 @@ import { loadIndex, writeNode, readNode, findStoreRoot, incomingEdges, danglingI
 import { neighbourhood, renderNeighbourhood, search, path as findPath, stats, isHiddenEdge, impact, renderImpact, moduleOf, workList, renderWorkList, didYouMean, suggest, clamp, ageInDays, formatAge, decayLabel } from '../src/query.js';
 import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
 import { fingerprintOf, normalizeContent, fingerprintFile } from '../src/fingerprint.js';
+import { parseAt, normalizeAnchor, captureAnchor, checkAnchor } from '../src/anchor.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
 import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
 import { parseEdgeFlag, cmdAdd, cmdLink, cmdRename, cmdVerify } from '../src/commands/write.js';
 import { cmdInit, cmdUninstall, cmdRules, detectRuleSets } from '../src/commands/init.js';
-import { cmdValidate, cmdPrune, cmdStale } from '../src/commands/read.js';
+import { cmdValidate, cmdPrune, cmdStale, cmdRelocate } from '../src/commands/read.js';
 import { parseArgs } from '../bin/edgelore.js';
 
 /** Repositorio temporal con Edgelore instalado, para pruebas aisladas. */
@@ -1213,4 +1214,111 @@ test('las claves del sello salen siempre en el mismo orden', () => {
     verified: { date: '2026-01-01', by: 'a@b.c', commit: 'abc1234', fingerprint: 'sha256:0123456789abcdef' },
   }).verified;
   assert.deepEqual(Object.keys(verified), ['fingerprint', 'commit', 'date', 'by']);
+});
+
+// --- Anclas de contenido ---------------------------------------------------
+//
+// `at: src/A.cs:42` deja de ser cierto en cuanto alguien anade una linea
+// arriba, y `at` es el campo de las aristas string-ref, las de mas valor del
+// indice. Hasta ahora NADA comprobaba que la linea 42 fuera la correcta: no es
+// que se desincronizara, es que nunca se verifico.
+
+test('parseAt separa fichero y linea, y rechaza lo que no lo es', () => {
+  assert.deepEqual(parseAt('src/A.cs:42'), { file: 'src/A.cs', line: 42 });
+  assert.deepEqual(parseAt('C:/x/A.cs:7'), { file: 'C:/x/A.cs', line: 7 }, 'rutas de Windows');
+  assert.equal(parseAt('src/A.cs'), null);
+  assert.equal(parseAt('src/A.cs:0'), null);
+  assert.equal(parseAt(undefined), null);
+});
+
+test('el ancla ignora la reindentacion', () => {
+  // Reindentar un bloque es el cambio mas frecuente que no altera lo que la
+  // linea dice; si contara como cambio, el ancla seria inservible.
+  assert.equal(normalizeAnchor('    foo(  1 , 2 )  '), normalizeAnchor('foo( 1 , 2 )'));
+});
+
+test('link captura el ancla solo, sin que nadie la escriba', () => {
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'uno\ndos\nRegisterRoute("detalle")\ncuatro\n');
+    cmdLink(['AppShell', 'DetallePage', 'string-ref'], { at: 'src/A.cs:3' });
+    const edge = readNode(root, 'AppShell').edges[0];
+    assert.equal(edge.anchor, 'RegisterRoute("detalle")');
+  });
+});
+
+test('una linea en blanco no se guarda como ancla', () => {
+  // No ancla nada: se movera sola en cuanto alguien toque el fichero, y
+  // guardarla daria una falsa sensacion de control.
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'uno\n\ntres\n');
+    cmdLink(['A', 'B', 'string-ref'], { at: 'src/A.cs:2', note: 'algo' });
+    assert.equal(readNode(root, 'A').edges[0].anchor, undefined);
+  });
+});
+
+test('relocate reajusta una referencia desplazada', () => {
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'uno\ndos\nRegisterRoute("detalle")\n');
+    cmdLink(['AppShell', 'DetallePage', 'string-ref'], { at: 'src/A.cs:3' });
+
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'nueva\notra\nuno\ndos\nRegisterRoute("detalle")\n');
+    assert.match(cmdRelocate([], {}).output, /se han desplazado/);
+    assert.equal(readNode(root, 'AppShell').edges[0].at, 'src/A.cs:3', 'sin --apply no toca nada');
+
+    cmdRelocate([], { apply: true });
+    assert.equal(readNode(root, 'AppShell').edges[0].at, 'src/A.cs:5');
+    assert.match(cmdRelocate([], {}).output, /apuntando a la linea correcta/);
+  });
+});
+
+test('relocate distingue desplazada de perdida', () => {
+  // Es toda la gracia: el desplazamiento es constante y no significa nada; que
+  // el texto desaparezca del fichero si.
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'uno\nRegisterRoute("detalle")\n');
+    cmdLink(['AppShell', 'DetallePage', 'string-ref'], { at: 'src/A.cs:2' });
+
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'uno\notra cosa\n');
+    const resultado = cmdRelocate([], {});
+    assert.equal(resultado.code, 1);
+    assert.match(resultado.output, /ya no aparece en el fichero/);
+  });
+});
+
+test('con varias lineas identicas se elige la mas cercana a la original', () => {
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'x()\nrelleno\nrelleno\nrelleno\nx()\n');
+    cmdLink(['A', 'B', 'string-ref'], { at: 'src/A.cs:5' });
+    // Se inserta una linea al principio: la referencia pasa de la 5 a la 6, y
+    // la otra ocurrencia identica sigue arriba. Elegir la primera del fichero
+    // mandaria a mirar el sitio equivocado.
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'nueva\nx()\nrelleno\nrelleno\nrelleno\nx()\n');
+    cmdRelocate([], { apply: true });
+    assert.equal(readNode(root, 'A').edges[0].at, 'src/A.cs:6');
+  });
+});
+
+test('validate informa de las referencias rotas sin romper el build', () => {
+  inSandbox((root) => {
+    fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'RegisterRoute("detalle")\n');
+    cmdLink(['A', 'B', 'string-ref'], { at: 'src/A.cs:1' });
+    fs.writeFileSync(path.join(root, 'src', 'A.cs'), 'otra cosa\n');
+
+    const resultado = cmdValidate([], {});
+    assert.equal(resultado.code, 0, 'informa, no rompe');
+    assert.match(resultado.output, /ya no aparece donde apuntan/);
+    assert.equal(cmdValidate([], { strict: true }).code, 1);
+  });
+});
+
+test('anchor sin at no tiene sentido y el esquema lo dice', () => {
+  const problemas = validateNode({ id: 'A', edges: [{ to: 'B', type: 'calls', anchor: 'algo' }] });
+  assert.equal(problemas.length, 1);
+  assert.match(problemas[0], /anchor sin at/);
 });

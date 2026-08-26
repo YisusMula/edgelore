@@ -150,7 +150,9 @@ Registra lo que **no se deduce leyendo el fichero**:
 - `lifecycle` — lo invoca el runtime: `OnAppearing`, `OnStart`, un ctor por DI.
   Siempre con `--trigger`: sin el, dentro de seis meses nadie sabra interpretarlo.
 - `string-ref` — rutas, reflexion, DI por nombre, procedimientos invocados por
-  cadena. Siempre con `--at` apuntando al literal.
+  cadena. Siempre con `--at` apuntando al literal: ademas de decir donde mirar,
+  guarda sola el texto de esa linea, y eso permite que `edgelore relocate`
+  reajuste la referencia cuando el fichero crece por arriba.
 - `event` — quien publica y quien consume.
 - `config` — que codigo depende de que clave.
 - `writes` / `reads` — sobre todo escrituras en tablas compartidas.

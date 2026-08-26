@@ -14,6 +14,7 @@ import { normalizeEdge, validateNode, isValidId, EDGE_TYPES, CONFIDENCE } from '
 import { loadRules, kindCatalog, implicitEdgesFor, checklistFor, renderChecklist } from '../rules.js';
 import { headCommit, currentUser, isGitRepo } from '../git.js';
 import { fingerprintFile } from '../fingerprint.js';
+import { captureAnchor } from '../anchor.js';
 
 /** Parsea `--edge destino:tipo:nota` en una arista normalizada. */
 export function parseEdgeFlag(raw) {
@@ -154,12 +155,21 @@ ${Object.entries(EDGE_TYPES).map(([key, help]) => `  ${key.padEnd(11)} ${help}`)
   delete node._file;
   node.id = from;
 
+  // El ancla se captura sola de la linea indicada. Si hubiera que escribirla a
+  // mano no la escribiria nadie, y una funcion que depende de que alguien se
+  // acuerde de usarla es una funcion que no existe. `--anchor` sigue estando
+  // para cuando la linea no es el mejor identificador (una llave suelta, por
+  // ejemplo) o cuando se registra sin tener el fichero delante.
+  const at = options.at;
+  const anchor = options.anchor ?? (at ? captureAnchor(root, at) : null);
+
   const edge = normalizeEdge({
     to,
     type,
     confidence: options.confidence ?? 'certain',
     trigger: options.trigger,
-    at: options.at,
+    at,
+    anchor: anchor ?? undefined,
     note: options.note,
   });
 

@@ -10,6 +10,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   loadIndex,
+  readNode,
+  writeNode,
   requireStoreRoot,
   danglingIds,
   classifyDangling,
@@ -37,6 +39,7 @@ import {
 import { loadRules, kindCatalog, renderKinds, checklistFor, renderChecklist } from '../rules.js';
 import { changedSince, filesChangedSince, isGitRepo, lastCommitFor } from '../git.js';
 import { fingerprintFile } from '../fingerprint.js';
+import { checkAnchor, withLine } from '../anchor.js';
 
 /**
  * Umbral de reverificacion en dias. Sin --max-age vale el de por defecto, que
@@ -219,6 +222,20 @@ export function cmdValidate(args, options) {
     caducados.sort((a, b) => b.days - a.days || a.id.localeCompare(b.id));
   }
 
+  // Cuarta categoria, tambien informativa: referencias `fichero:linea` cuyo
+  // ancla ya no casa. El desplazamiento es cosmetico y lo arregla `relocate`;
+  // que el texto haya desaparecido del fichero si es una referencia rota.
+  const desplazadas = [];
+  const rotas = [];
+  const cacheFuentes = new Map();
+  for (const node of index.nodes.values()) {
+    for (const edge of node.edges ?? []) {
+      const resultado = checkAnchor(root, edge, cacheFuentes);
+      if (resultado.estado === 'movida') desplazadas.push(node.id);
+      else if (resultado.estado === 'perdida') rotas.push({ id: node.id, to: edge.to, at: edge.at });
+    }
+  }
+
   const { esperados, sospechosos } = classifyDangling(index);
   const lines = [];
 
@@ -244,6 +261,19 @@ export function cmdValidate(args, options) {
     lines.push('  Suelen ser restos de un renombrado hecho sin `edgelore rename`.');
   }
 
+  if (rotas.length) {
+    if (lines.length) lines.push('');
+    lines.push(`${rotas.length} referencia(s) cuyo texto ya no aparece donde apuntan:`);
+    rotas.slice(0, 15).forEach((entry) => lines.push(`  ${entry.id} -> ${entry.to}  ${entry.at}`));
+    if (rotas.length > 15) lines.push(`  ... y ${rotas.length - 15} mas`);
+    lines.push('  Revisalas: el literal se movio de fichero o dejo de existir.');
+  }
+
+  if (desplazadas.length) {
+    if (lines.length) lines.push('');
+    lines.push(`${desplazadas.length} referencia(s) solo desplazadas de linea. Arreglalas con: edgelore relocate --apply`);
+  }
+
   if (caducados.length) {
     if (lines.length) lines.push('');
     lines.push(`${caducados.length} hecho(s) sin reverificar desde hace mas de ${maxAgeFrom(options)} dias:`);
@@ -261,7 +291,8 @@ export function cmdValidate(args, options) {
 
   // Solo el esquema rompe el build por defecto.
   const failed = errores.length > 0
-    || (options.strict && (desincronizados.length > 0 || sospechosos.length > 0 || caducados.length > 0));
+    || (options.strict
+      && (desincronizados.length > 0 || sospechosos.length > 0 || caducados.length > 0 || rotas.length > 0));
   return { output: lines.join('\n'), code: failed ? 1 : 0 };
 }
 
@@ -390,4 +421,99 @@ export function cmdStale(args, options) {
   }
   if (!lines.length) lines.push('Todos los hechos verificados siguen al dia.');
   return { output: lines.join('\n'), code: stale.length ? 1 : 0 };
+}
+
+/**
+ * Recorre las aristas con ancla y reajusta las que se han desplazado.
+ *
+ * Sin esto, `at: src/A.cs:42` envejece mal por el motivo mas tonto posible:
+ * alguien anade una linea arriba. Ese desplazamiento es constante y no
+ * significa nada, asi que si contara como caducidad el aviso seria ruido
+ * continuo; en cambio, que el ancla desaparezca del fichero si significa algo.
+ *
+ * Por defecto solo informa. `--apply` reescribe las lineas, que es una
+ * operacion segura -no cambia ningun hecho, solo corrige donde mirar- pero que
+ * toca ficheros del indice y merece ser deliberada.
+ */
+export function cmdRelocate(args, options) {
+  const root = requireStoreRoot();
+  const index = loadIndex(root);
+  const movidas = [];
+  const perdidas = [];
+  const ambiguas = [];
+  const cacheFuentes = new Map();
+
+  for (const node of index.nodes.values()) {
+    for (const edge of node.edges ?? []) {
+      const resultado = checkAnchor(root, edge, cacheFuentes);
+      if (resultado.estado === 'movida') {
+        const entrada = { id: node.id, to: edge.to, type: edge.type, at: edge.at, line: resultado.line };
+        movidas.push(entrada);
+        if (resultado.ambigua) ambiguas.push(entrada);
+      } else if (resultado.estado === 'perdida') {
+        perdidas.push({ id: node.id, to: edge.to, type: edge.type, at: edge.at, anchor: edge.anchor });
+      }
+    }
+  }
+
+  if (options.json) return { output: JSON.stringify({ movidas, perdidas }, null, 2) };
+
+  const lines = [];
+
+  if (movidas.length && options.apply) {
+    // Se agrupa por nodo para escribir cada fichero una sola vez.
+    const porNodo = new Map();
+    for (const entrada of movidas) {
+      if (!porNodo.has(entrada.id)) porNodo.set(entrada.id, []);
+      porNodo.get(entrada.id).push(entrada);
+    }
+    for (const [id, entradas] of porNodo) {
+      const existing = readNode(root, id);
+      if (!existing) continue;
+      const node = { ...existing };
+      const notes = node.notes ?? '';
+      delete node.notes;
+      delete node._file;
+      node.edges = (node.edges ?? []).map((edge) => {
+        const entrada = entradas.find((e) => e.to === edge.to && e.type === edge.type);
+        return entrada ? { ...edge, at: withLine(edge.at, entrada.line) } : edge;
+      });
+      writeNode(root, node, notes);
+    }
+    lines.push(`${movidas.length} referencia(s) reajustadas:`);
+    movidas.slice(0, 15).forEach((e) => lines.push(`  ${e.id} -> ${e.to}  ${e.at} => ${withLine(e.at, e.line)}`));
+    if (movidas.length > 15) lines.push(`  ... y ${movidas.length - 15} mas`);
+  } else if (movidas.length) {
+    lines.push(`${movidas.length} referencia(s) se han desplazado:`);
+    movidas.slice(0, 15).forEach((e) => lines.push(`  ${e.id} -> ${e.to}  ${e.at} => ${withLine(e.at, e.line)}`));
+    if (movidas.length > 15) lines.push(`  ... y ${movidas.length - 15} mas`);
+    lines.push('  Reajustalas con: edgelore relocate --apply');
+  }
+
+  if (ambiguas.length) {
+    if (lines.length) lines.push('');
+    lines.push(`${ambiguas.length} de ellas tenian varias lineas identicas; se eligio la mas cercana a la original.`);
+  }
+
+  if (perdidas.length) {
+    if (lines.length) lines.push('');
+    lines.push(`${perdidas.length} referencia(s) cuyo texto ya no aparece en el fichero:`);
+    perdidas.slice(0, 15).forEach((e) => lines.push(`  ${e.id} -> ${e.to}  ${e.at}\n      buscaba: ${e.anchor}`));
+    if (perdidas.length > 15) lines.push(`  ... y ${perdidas.length - 15} mas`);
+    lines.push('  Estas si estan caducadas de verdad: revisalas y corrige el `at`.');
+  }
+
+  if (!lines.length) {
+    const conAncla = [...index.nodes.values()].reduce(
+      (total, node) => total + (node.edges ?? []).filter((edge) => edge.anchor).length,
+      0,
+    );
+    lines.push(
+      conAncla
+        ? `${conAncla} referencia(s) con ancla, todas apuntando a la linea correcta.`
+        : 'Ninguna arista tiene ancla todavia. Se capturan solas al usar `edgelore link --at`.',
+    );
+  }
+
+  return { output: lines.join('\n'), code: perdidas.length ? 1 : 0 };
 }

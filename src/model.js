@@ -40,7 +40,7 @@ export const CONFIDENCE = {
 
 /** Orden canonico de claves: garantiza diffs minimos y estables en git. */
 const NODE_KEY_ORDER = ['id', 'kind', 'file', 'lang', 'summary', 'tags', 'edges', 'verified'];
-const EDGE_KEY_ORDER = ['to', 'type', 'confidence', 'source', 'trigger', 'at', 'note'];
+const EDGE_KEY_ORDER = ['to', 'type', 'confidence', 'source', 'trigger', 'at', 'anchor', 'note'];
 /**
  * Orden canonico dentro de `verified`. El serializador respeta el orden de
  * insercion, asi que sin esto dos personas que sellan el mismo hecho producen
@@ -182,6 +182,10 @@ export function validateNode(node, { source = 'hecho' } = {}) {
     // dentro de seis meses, que es el caso que Edgelore existe para resolver.
     if ((edge.type === 'lifecycle' || edge.type === 'schedules') && !edge.trigger) {
       fail(`${label}: las aristas ${edge.type} necesitan "trigger" explicando que las dispara`);
+    }
+    if (edge.anchor !== undefined) {
+      if (typeof edge.anchor !== 'string') fail(`${label}: anchor debe ser texto`);
+      else if (!edge.at) fail(`${label}: anchor sin at; el ancla solo tiene sentido junto a una linea`);
     }
     if (edge.type === 'string-ref' && !edge.note && !edge.at) {
       fail(`${label}: las aristas string-ref necesitan "at" o "note" indicando donde esta el literal`);

@@ -25,6 +25,7 @@ edges:
     confidence: certain
     source: human
     at: src/Ui/DetallePage.xaml.cs:18
+    anchor: _vm = new FacturaViewModel(Id);
 verified:
   fingerprint: "sha256:9f2c1a4b8e6d3057"
   commit: a3f9c21
@@ -89,6 +90,7 @@ tal» sigue siendo información, aunque `stale` no pueda comprobarlo después.
 | `source` | sí (por defecto `human`) | `human`, `rule:<id>` o `extractor:<id>`. |
 | `trigger` | en `lifecycle` y `schedules` | Qué la dispara. |
 | `at` | en `string-ref` (o `note`) | `fichero:línea` donde está el literal. |
+| `anchor` | no | Texto de esa línea. Permite reajustarla cuando se desplaza. Se captura solo. |
 | `note` | no | Matiz breve. |
 
 ## Vocabulario de tipos
@@ -146,6 +148,40 @@ inline y 1.200 para el cuerpo, indicando siempre cuánto se ha recortado. Es
 condición de que el índice ahorre: una consulta que devuelve 10 KB cuesta más
 que la búsqueda que evita, y ese texto es además lo que el hook previo a la
 edición inyecta sin que nadie lo pida. `--all` lo levanta todo.
+
+### El ancla de una referencia
+
+`at: src/AppShell.xaml.cs:42` deja de ser cierto en cuanto alguien añade una
+línea más arriba — y `at` es el campo de las aristas `string-ref`, las de más
+valor del índice. **El dato más valioso era el más frágil, y fallaba en
+silencio**: hasta que existió el ancla, nada comprobaba nunca que la línea 42
+fuera la correcta. No es que se desincronizara; es que jamás se verificó.
+
+El ancla guarda el texto de esa línea, normalizado (espacios colapsados, para
+que reindentar no cuente). Al comprobarla hay tres desenlaces:
+
+| Situación | Significado |
+|---|---|
+| La línea sigue casando | Todo bien. |
+| El ancla está en **otra línea** | Desplazamiento. `edgelore relocate --apply` reescribe el `at`. |
+| El ancla **no aparece** | La referencia está rota de verdad: hay que mirarla. |
+
+Ése es el efecto que importa: convierte el desplazamiento de líneas —constante
+y sin significado— en cambio de contenido —raro y significativo—. Sin esa
+distinción, cualquier aviso basado en `at` sería ruido continuo, y un aviso que
+da guerra deja de leerse.
+
+**El ancla se captura sola** al usar `edgelore link --at`. Si hubiera que
+escribirla a mano no la escribiría nadie, y una función que depende de que
+alguien se acuerde de usarla es una función que no existe. `--anchor` está para
+cuando la línea no es buen identificador (una llave suelta) o cuando se registra
+sin tener el fichero delante.
+
+**Nada de esto se ejecuta al consultar.** Abrir ficheros fuente en `query`,
+`impact` o el hook cambiaría el modelo de coste de la herramienta —hoy una
+consulta solo toca `.edgelore/`— y ralentizaría el camino que se recorre en cada
+edición. Se comprueba en `relocate` y `validate`, donde alguien está mirando el
+estado del índice a propósito.
 
 ## Reglas de identificación
 
