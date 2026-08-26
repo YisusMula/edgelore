@@ -96,9 +96,9 @@ Hay dos marcas mas que significan lo mismo -este hecho puede estar mintiendo-:
   tiene sello. Alguien lo escribio y nadie lo ha comprobado nunca.
 
 `impact` te dice en una linea cuantos de los dependientes alcanzados estan en
-ese estado, contados por nodo y no por arista. Si vas a apoyar un cambio en uno de ellos, abrelo y confirmalo, y sella
-lo que confirmes con `edgelore verify <id>`: es lo que evita que la proxima
-persona pague la misma comprobacion.
+ese estado, contados por nodo y no por arista. Si vas a apoyar un cambio en uno
+de ellos, abrelo y confirmalo, y sella lo que confirmes con `edgelore verify
+<id>`: es lo que evita que la proxima persona pague la misma comprobacion.
 
 Cuando un texto salga cortado con `[...+N caracteres]`, la salida esta acotada a
 proposito. Si de verdad necesitas el resto, `edgelore query <id> --all`; casi

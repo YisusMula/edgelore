@@ -1127,3 +1127,28 @@ test('validate calla sobre la antiguedad salvo que se le pida', () => {
     assert.equal(cmdValidate([], { 'max-age': 365, strict: true }).code, 1, 'con --strict si rompe');
   });
 });
+
+test('no se marca SIN VERIFICAR donde verify no puede sellar nada', () => {
+  // En un repositorio sin control de versiones, verificationStamp no sella y
+  // `edgelore verify` sale con codigo 1: el aviso saldria en el 100% de los
+  // nodos sin ninguna forma de quitarlo. Un aviso que no se puede accionar solo
+  // ensena a ignorar los avisos.
+  const root = sandbox();
+  writeNode(root, { id: 'A', edges: [{ to: 'B', type: 'calls' }] });
+  const result = neighbourhood(loadIndex(root), 'A');
+  // Ojo con la asercion: `~SIN VERIFICAR` es tambien la marca de confianza de
+  // una arista, asi que hay que mirar la frase del nodo, no la subcadena suelta.
+  const marca = 'SIN VERIFICAR: nadie ha confirmado';
+  assert.ok(renderNeighbourhood(result).includes(marca), 'con git si se avisa');
+  assert.ok(!renderNeighbourhood(result, { sellable: false }).includes(marca));
+});
+
+test('impact tampoco cuenta los sin sellar cuando no hay con que sellar', () => {
+  const root = sandbox();
+  writeNode(root, { id: 'Dep', edges: [{ to: 'Hub', type: 'calls' }] });
+  writeNode(root, { id: 'Hub', edges: [] });
+  const index = loadIndex(root);
+  const result = impact(index, 'Hub');
+  assert.match(renderImpact(result, index), /sin verificar nunca/);
+  assert.ok(!renderImpact(result, index, { sellable: false }).includes('sin verificar nunca'));
+});

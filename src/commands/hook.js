@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { findStoreRoot, loadIndex } from '../store.js';
 import { impact, renderImpact } from '../query.js';
-import { changedSince, isGitRepo } from '../git.js';
+import { changedSince, isGitRepo, looksLikeGitRepo } from '../git.js';
 
 const MAX_SUGGESTIONS = 6;
 
@@ -113,7 +113,7 @@ export function buildImpactNotice(root, index, files, { maxDepth = 3 } = {}) {
   // que nadie lo haya pedido, asi que da la senal y deja el detalle a demanda.
   const lines = ['Edgelore: lo que vas a editar tiene dependencias registradas.'];
   for (const result of affected.slice(0, HOOK_MAX_NODES)) {
-    lines.push('', renderImpact(result, index, { limit: HOOK_LEVEL_LIMIT }));
+    lines.push('', renderImpact(result, index, { limit: HOOK_LEVEL_LIMIT, sellable: looksLikeGitRepo(root) }));
   }
   if (affected.length > HOOK_MAX_NODES) {
     const resto = affected.slice(HOOK_MAX_NODES);

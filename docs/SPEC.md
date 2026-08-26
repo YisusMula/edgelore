@@ -100,9 +100,14 @@ un hecho sigue siendo cierto sin mirarlo, así que Edgelore no degrada
 dejar de imprimir el sello a secas: pasados `--max-age` días (365 por defecto),
 `query` añade `<- sin reverificar desde hace N meses` e `impact` resume cuántos
 de los dependientes alcanzados están en esa situación, contados por nodo y no
-por arista. Un nodo con aristas y sin
-`verified` se marca `SIN VERIFICAR`. No se añade ningún campo: el dato ya
-estaba en `verified.date`.
+por arista. Un nodo con aristas y sin `verified` se marca `SIN VERIFICAR`. No
+se añade ningún campo: el dato ya estaba en `verified.date`.
+
+Ninguna de las dos marcas aparece donde no hay control de versiones:
+`verificationStamp` no sella sin git y `edgelore verify` no puede funcionar
+allí, así que el aviso saldría en el 100% de los nodos sin forma de quitarlo —
+que es la manera exacta de enseñar a ignorar los avisos. Volverán a aparecer
+cuando el sello deje de depender de git y pase a ser una huella del contenido.
 
 **El texto libre se acota al renderizar.** `summary` lo limita el esquema a 300
 caracteres, pero `note`, `trigger`, `at` y el cuerpo del markdown (`notes`) no

@@ -199,7 +199,7 @@ function renderEdgeList(edges, direction, limit) {
   return lines;
 }
 
-export function renderNeighbourhood(result, { notes = true, limit = DEFAULT_LEVEL_LIMIT, maxAgeDays = DEFAULT_MAX_AGE_DAYS, now = Date.now() } = {}) {
+export function renderNeighbourhood(result, { notes = true, limit = DEFAULT_LEVEL_LIMIT, maxAgeDays = DEFAULT_MAX_AGE_DAYS, now = Date.now(), sellable = true } = {}) {
   const lines = [];
   const { id, node, outgoing, incoming } = result;
   // --all (limit <= 0) tambien levanta el tope del texto libre: quien lo pide
@@ -217,9 +217,15 @@ export function renderNeighbourhood(result, { notes = true, limit = DEFAULT_LEVE
         `  verificado: ${node.verified.commit}${node.verified.date ? ` (${node.verified.date})` : ''}` +
           (decay ? `  <- ${decay}` : ''),
       );
-    } else if (node.edges?.length) {
+    } else if (node.edges?.length && sellable) {
       // Un hecho que nadie confirmo nunca se lee igual de convencido que uno
       // sellado ayer. Decirlo cuesta una linea.
+      //
+      // Salvo donde no hay control de versiones: alli `verify` no puede sellar
+      // nada, asi que el aviso saldria en el 100% de los nodos y sin ninguna
+      // forma de quitarlo. Un aviso que no se puede accionar solo ensena a
+      // ignorar los avisos. Se recuperara cuando el sello deje de depender de
+      // git y pase a ser una huella del contenido.
       lines.push('  SIN VERIFICAR: nadie ha confirmado este hecho todavia.');
     }
   } else {
@@ -475,7 +481,7 @@ function decayedCount(result, index, { maxAgeDays, now }) {
   return { viejos: viejos.size, sinSellar: sinSellar.size };
 }
 
-export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT, maxAgeDays = DEFAULT_MAX_AGE_DAYS, now = Date.now() } = {}) {
+export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT, maxAgeDays = DEFAULT_MAX_AGE_DAYS, now = Date.now(), sellable = true } = {}) {
   const lines = [`ALCANCE DE ${result.id}`];
 
   if (!result.known) {
@@ -548,7 +554,11 @@ export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT, maxAg
     lines.push('Listado recortado. Para verlo entero: --all (o --json para procesarlo).');
   }
 
-  const { viejos, sinSellar } = decayedCount(result, index, { maxAgeDays, now });
+  const contados = decayedCount(result, index, { maxAgeDays, now });
+  const viejos = contados.viejos;
+  // Sin control de versiones nada lleva sello, asi que "sin verificar nunca"
+  // seria el total y no informaria de nada. Mismo motivo que en query.
+  const sinSellar = sellable ? contados.sinSellar : 0;
   if (viejos || sinSellar) {
     const partes = [];
     if (viejos) partes.push(`${viejos} sin reverificar desde hace mas de ${Math.round(maxAgeDays / 30)} meses`);

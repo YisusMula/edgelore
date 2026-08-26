@@ -35,7 +35,7 @@ import {
   DEFAULT_MAX_AGE_DAYS,
 } from '../query.js';
 import { loadRules, kindCatalog, renderKinds, checklistFor, renderChecklist } from '../rules.js';
-import { changedSince, filesChangedSince, isGitRepo, lastCommitFor } from '../git.js';
+import { changedSince, filesChangedSince, isGitRepo, lastCommitFor, looksLikeGitRepo } from '../git.js';
 
 /**
  * Umbral de reverificacion en dias. Sin --max-age vale el de por defecto, que
@@ -70,6 +70,7 @@ export function cmdQuery(args, options) {
       notes: !options.brief,
       limit: options.all ? 0 : options.limit,
       maxAgeDays: maxAgeFrom(options),
+      sellable: looksLikeGitRepo(root),
     }),
   };
 }
@@ -83,7 +84,8 @@ export function cmdQuery(args, options) {
 export function cmdImpact(args, options) {
   const id = args[0];
   if (!id) throw new Error('Uso: edgelore impact <id> [--depth N] [--files] [--module <prefijo>]');
-  const index = loadIndex(requireStoreRoot());
+  const root = requireStoreRoot();
+  const index = loadIndex(root);
   const depth = Number.isFinite(options.depth) && options.depth > 0 ? options.depth : 4;
   const result = impact(index, id, { maxDepth: depth });
 
@@ -108,6 +110,7 @@ export function cmdImpact(args, options) {
     output: renderImpact(result, index, {
       limit: options.all ? 0 : options.limit,
       maxAgeDays: maxAgeFrom(options),
+      sellable: looksLikeGitRepo(root),
     }),
   };
 }
