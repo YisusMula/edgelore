@@ -1067,6 +1067,43 @@ test('impact resume cuantos dependientes estan sin reverificar', () => {
   assert.match(texto, /1 sin verificar nunca/);
 });
 
+test('el recuento de decaidos cuenta nodos, no aristas', () => {
+  // El mismo dependiente llega por dos motivos distintos y los dos se listan
+  // -son dos formas de romperlo- pero es un unico sitio que abrir. Contando
+  // aristas, el aviso decia 2 donde hay 1, justo en la linea que manda a
+  // comprobarlos.
+  const root = sandbox();
+  writeNode(root, {
+    id: 'Erp.Ventas.Pagina',
+    edges: [
+      { to: 'Hub', type: 'implements' },
+      { to: 'Hub', type: 'reads' },
+    ],
+  });
+  writeNode(root, { id: 'Hub', edges: [] });
+  const index = loadIndex(root);
+  const result = impact(index, 'Hub');
+  assert.equal(result.levels[0].entries.length, 2, 'las dos aristas se siguen listando');
+  const texto = renderImpact(result, index);
+  assert.match(texto, /Del dependiente alcanzado, 1 sin verificar nunca\. Comprobalo /, texto);
+  assert.ok(!texto.includes('2 sin verificar nunca'), texto);
+});
+
+test('el recuento de decaidos habla de alcanzados, tambien con la lista recortada', () => {
+  // Cuando un nivel se reparte por modulo no se imprime ni un nombre, asi que
+  // "de los dependientes listados" prometia una lista que no estaba ahi.
+  const root = sandbox();
+  for (let i = 0; i < 4; i += 1) {
+    writeNode(root, { id: `Erp.Ventas.P${i}`, edges: [{ to: 'Hub', type: 'implements' }] });
+  }
+  writeNode(root, { id: 'Hub', edges: [] });
+  const index = loadIndex(root);
+  const texto = renderImpact(impact(index, 'Hub'), index, { limit: 2 });
+  assert.match(texto, /reparto por modulo/, texto);
+  assert.match(texto, /De los 4 dependientes alcanzados, 4 sin verificar nunca/, texto);
+  assert.ok(!texto.includes('dependientes listados'), texto);
+});
+
 test('validate calla sobre la antiguedad salvo que se le pida', () => {
   // Misma regla que con la desincronizacion: todo hecho envejece, asi que una
   // lista de caducados en la salida por defecto crece cada dia hasta que se

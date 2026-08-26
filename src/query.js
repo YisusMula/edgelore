@@ -450,22 +450,29 @@ export function impact(index, id, { maxDepth = 4 } = {}) {
 }
 
 /**
- * Cuantos de los dependientes mostrados afirman algo que nadie reverifica desde
- * hace tiempo. Se da agregado, no linea a linea: repetir la antiguedad en cada
+ * Cuantos de los dependientes afirman algo que nadie reverifica desde hace
+ * tiempo. Se da agregado, no linea a linea: repetir la antiguedad en cada
  * entrada multiplicaria el coste de la salida justo en el caso -muchos
  * dependientes- en el que el tope existe para evitarlo.
+ *
+ * Se cuenta por NODO, no por arista. Un mismo dependiente aparece una vez por
+ * cada motivo por el que un cambio puede romperlo -y se listan todos, que para
+ * eso estan- pero es un unico sitio que abrir y comprobar. Contar aristas
+ * inflaba el numero justo en el aviso que manda a comprobarlas, y un aviso que
+ * exagera se deja de leer. Asi el total coincide con `result.affected`, que es
+ * el que ya sale en la cabecera.
  */
 function decayedCount(result, index, { maxAgeDays, now }) {
-  let viejos = 0;
-  let sinSellar = 0;
+  const viejos = new Set();
+  const sinSellar = new Set();
   for (const level of result.levels) {
     for (const entry of level.entries) {
       const verified = index.nodes.get(entry.id)?.verified;
-      if (!verified?.commit) sinSellar += 1;
-      else if (decayLabel(verified, { maxAgeDays, now })) viejos += 1;
+      if (!verified?.commit) sinSellar.add(entry.id);
+      else if (decayLabel(verified, { maxAgeDays, now })) viejos.add(entry.id);
     }
   }
-  return { viejos, sinSellar };
+  return { viejos: viejos.size, sinSellar: sinSellar.size };
 }
 
 export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT, maxAgeDays = DEFAULT_MAX_AGE_DAYS, now = Date.now() } = {}) {
@@ -546,7 +553,13 @@ export function renderImpact(result, index, { limit = DEFAULT_LEVEL_LIMIT, maxAg
     const partes = [];
     if (viejos) partes.push(`${viejos} sin reverificar desde hace mas de ${Math.round(maxAgeDays / 30)} meses`);
     if (sinSellar) partes.push(`${sinSellar} sin verificar nunca`);
-    lines.push('', `De los dependientes listados, ${partes.join(' y ')}. Comprobalos antes de fiarte.`);
+    // "alcanzados" y no "listados": cuando un nivel se reparte por modulo no se
+    // imprime ni un nombre, y el recuento cubre igual a todos los dependientes.
+    const total = result.affected === 1
+      ? 'Del dependiente alcanzado'
+      : `De los ${result.affected} dependientes alcanzados`;
+    const cierre = viejos + sinSellar === 1 ? 'Comprobalo' : 'Comprobalos';
+    lines.push('', `${total}, ${partes.join(' y ')}. ${cierre} antes de fiarte.`);
   }
 
   lines.push('', coverageWarning(index));

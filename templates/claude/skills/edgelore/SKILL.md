@@ -95,8 +95,8 @@ Hay dos marcas mas que significan lo mismo -este hecho puede estar mintiendo-:
 - `SIN VERIFICAR: nadie ha confirmado este hecho todavia` cuando el nodo no
   tiene sello. Alguien lo escribio y nadie lo ha comprobado nunca.
 
-`impact` te dice en una linea cuantos de los dependientes listados estan en ese
-estado. Si vas a apoyar un cambio en uno de ellos, abrelo y confirmalo, y sella
+`impact` te dice en una linea cuantos de los dependientes alcanzados estan en
+ese estado, contados por nodo y no por arista. Si vas a apoyar un cambio en uno de ellos, abrelo y confirmalo, y sella
 lo que confirmes con `edgelore verify <id>`: es lo que evita que la proxima
 persona pague la misma comprobacion.
 

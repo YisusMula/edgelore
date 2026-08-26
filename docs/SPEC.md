@@ -99,7 +99,8 @@ un hecho sigue siendo cierto sin mirarlo, así que Edgelore no degrada
 `confidence` por su cuenta — sería inventarse una verdad. Lo que sí hace es
 dejar de imprimir el sello a secas: pasados `--max-age` días (365 por defecto),
 `query` añade `<- sin reverificar desde hace N meses` e `impact` resume cuántos
-de los dependientes listados están en esa situación. Un nodo con aristas y sin
+de los dependientes alcanzados están en esa situación, contados por nodo y no
+por arista. Un nodo con aristas y sin
 `verified` se marca `SIN VERIFICAR`. No se añade ningún campo: el dato ya
 estaba en `verified.date`.
 
