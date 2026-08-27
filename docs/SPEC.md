@@ -183,6 +183,46 @@ consulta solo toca `.edgelore/`— y ralentizaría el camino que se recorre en c
 edición. Se comprueba en `relocate` y `validate`, donde alguien está mirando el
 estado del índice a propósito.
 
+### Nunca un secreto en un hecho
+
+`edgelore add` y `edgelore link` **se niegan a escribir** si detectan una cadena
+de conexión con contraseña, una clave de AWS, un token de GitHub o Slack, un JWT
+o una clave privada en el texto del hecho. `validate` rompe el build por ello
+**sin necesidad de `--strict`**, a diferencia del resto de categorías
+informativas.
+
+El motivo del trato distinto: el desgaste normal —ficheros movidos, hechos sin
+reverificar— se arregla solo cuando alguien pasa por ahí. Un secreto no. Es la
+única clase de fallo que **empeora cuanto más tarde se detecta** (una vez
+commiteado ya no se borra del historial: hay que rotar la credencial) y la única
+cuyo coste lo paga alguien distinto de quien la cometió.
+
+Cada patrón exige **clave más valor**, nunca una palabra suelta. `Erp.Config.ApiKey`
+como id de un nodo `config-key` es el uso previsto de la herramienta, y «la clave
+vive en appsettings» es una nota legítima; lo que no lo es nunca es
+`Password=loquesea`. Medido contra los 36 ficheros de este repositorio: cero
+falsos positivos. `--force` existe para el que no hayamos previsto.
+
+Los mensajes **nunca repiten lo encontrado**, solo su tipo: acaban en la
+terminal, en el log de CI y probablemente en un ticket, y repetir el valor
+multiplicaría la fuga en vez de contenerla.
+
+### Lo que el hook inyecta es dato, no instrucción
+
+Cualquier herramienta que meta contenido del repositorio en el contexto de un
+agente es superficie de inyección, y resolverlo es responsabilidad de la
+herramienta, no de la disciplina de cada equipo.
+
+Aquí el riesgo es concreto y asimétrico: un `.edgelore/nodes/*.md` **parece
+documentación y se revisa como documentación**, no como código — pero el hook lo
+inyecta solo antes de la siguiente edición, sin que nadie lo pida. En un
+repositorio público con contribuciones externas, esa diferencia entre cómo se
+revisa y cómo se ejecuta es el vector.
+
+Por eso todo lo que emite el hook va envuelto en `<edgelore-datos>` con un
+preámbulo explícito. Es corto a propósito —61 tokens fijos por edición— y dice
+lo mínimo: de dónde viene, que no son órdenes, y qué hacer si lo parecen.
+
 ## Reglas de identificación
 
 - Un id casa con `^[A-Za-z_][\w.+-]*(/[\w.+-]+)*$` y no pasa de 200 caracteres.

@@ -110,6 +110,7 @@ OPCIONES COMUNES
   --brief         Omite las notas largas en query.
   --strict        En validate, la desincronizacion con el codigo tambien rompe.
   --apply         En prune, relocate y scan, actua de verdad. Sin el, solo lista.
+  --force         Al escribir, ignora el aviso de secreto detectado.
   --unverified    Al escribir, no sella el hecho como verificado.
   --confidence X  certain, likely o unverified.
   --all           En query/impact, lista todas las dependencias sin recortar.

@@ -15,6 +15,7 @@ import { loadRules, kindCatalog, implicitEdgesFor, checklistFor, renderChecklist
 import { headCommit, currentUser, isGitRepo } from '../git.js';
 import { fingerprintFile } from '../fingerprint.js';
 import { captureAnchor } from '../anchor.js';
+import { findSecrets, nodeText, secretWarning } from '../secrets.js';
 
 /** Parsea `--edge destino:tipo:nota` en una arista normalizada. */
 export function parseEdgeFlag(raw) {
@@ -50,6 +51,27 @@ export function parseEdgeFlag(raw) {
  * "alguien afirmo esto el dia tal" sigue siendo informacion, aunque `stale` no
  * pueda comprobarlo despues.
  */
+/**
+ * Corta la escritura si el texto del hecho parece contener un secreto.
+ *
+ * Se comprueba AQUI y no solo en `validate` porque este es el ultimo momento
+ * util: en cuanto el fichero se escribe y se commitea, el secreto vive en el
+ * historial y rotarlo es la unica salida. Avisar despues no arregla nada.
+ *
+ * Corta en vez de avisar porque un secreto en el texto de un hecho no tiene
+ * ningun uso legitimo: lo que hace falta saber es DONDE esta la credencial, no
+ * cual es. `--force` existe para el falso positivo que no hayamos previsto.
+ */
+function bloqueaSiHaySecreto(node, notes, options) {
+  if (options.force) return null;
+  const tipos = findSecrets(nodeText(node, notes));
+  if (!tipos.length) return null;
+  return {
+    output: `${secretWarning(tipos, { id: node.id })}\n\nSi es un falso positivo, repite con --force.`,
+    code: 1,
+  };
+}
+
 function verificationStamp(root, options, file) {
   if (options.unverified) return undefined;
   const stamp = {};
@@ -117,6 +139,9 @@ export function cmdAdd(args, options) {
   if (problems.length) return { output: problems.join('\n'), code: 1 };
 
   const notes = options.note ?? existing?.notes ?? '';
+  const secreto = bloqueaSiHaySecreto(node, notes, options);
+  if (secreto) return secreto;
+
   const file = writeNode(root, node, notes);
 
   const lines = [`${existing ? 'Actualizado' : 'Registrado'}: ${id}`, `  ${path.relative(root, file)}`];
@@ -182,6 +207,9 @@ ${Object.entries(EDGE_TYPES).map(([key, help]) => `  ${key.padEnd(11)} ${help}`)
 
   const problems = validateNode(node, { source: from });
   if (problems.length) return { output: problems.join('\n'), code: 1 };
+
+  const secreto = bloqueaSiHaySecreto(node, existing?.notes ?? '', options);
+  if (secreto) return secreto;
 
   writeNode(root, node, existing?.notes ?? '');
   // Basta con mirar si existe la ficha del destino: cargar el indice entero

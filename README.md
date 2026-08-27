@@ -271,6 +271,17 @@ Los dos hooks cierran el círculo sin depender de que nadie se acuerde:
   mal escrito rompe; que alguien borre un fichero, no. Romper el build por lo
   segundo deja el CI en rojo permanente, y un CI que lleva meses en rojo se
   ignora — perdiendo la única defensa automática contra que el índice mienta.
+- **Un secreto nunca entra en el índice.** `add` y `link` se niegan a escribir si
+  detectan una credencial en el texto, y `validate` rompe el build por ello sin
+  `--strict`. Es la única clase de fallo que empeora cuanto más tarde se
+  detecta —una vez commiteado hay que rotar la credencial— y la única cuyo coste
+  lo paga alguien distinto de quien la cometió. Los patrones exigen clave *y*
+  valor: cero falsos positivos medidos sobre este repositorio.
+- **Lo que el hook inyecta va marcado como dato, no como instrucción.** Un
+  fichero del índice parece documentación y se revisa como documentación, pero
+  el hook lo inyecta solo en la siguiente edición. En un repositorio con
+  contribuciones externas esa asimetría es un vector, y lo resuelve la
+  herramienta, no la disciplina de cada equipo.
 - **La salida está acotada por diseño.** Ningún comando puede devolver miles de
   líneas: el índice deja de ahorrar en el momento en que una consulta cuesta más
   que la búsqueda que evita. Eso incluye el texto libre — notas, disparadores,
@@ -297,7 +308,7 @@ Dicho ahora y no dentro de tres meses:
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 176 pruebas en
+v0.1. El núcleo curado está completo y probado (`npm test`, 184 pruebas en
 Linux, Windows y macOS).
 
 El formato distingue el origen de cada arista (`human`, `rule:`, `import:`,
