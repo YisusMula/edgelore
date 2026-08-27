@@ -22,12 +22,14 @@
   "keywords": [
     "knowledge-graph",
     "code-index",
+    "code-navigation",
+    "codebase-documentation",
+    "context-engineering",
     "claude-code",
     "ai-agents",
-    "static-analysis",
+    "cli",
     "dotnet",
-    "maui",
-    "codebase-documentation"
+    "maui"
   ],
   "repository": {
     "type": "git",
