@@ -145,6 +145,7 @@ edgelore link AppShell Erp.Ui.DetallePage string-ref \
 edgelore stale                            # hechos cuyo código cambió tras verificarlos
 edgelore verify Erp.Ui.DetallePage        # confirmarlo en el commit actual
 edgelore rename Erp.Ui.Vieja Erp.Ui.Nueva # al refactorizar: reapunta todo lo que la citaba
+edgelore remove Erp.Ui.Muerta             # borrar un hecho; --force si algo le apunta
 edgelore relocate                         # referencias fichero:linea desplazadas; --apply reajusta
 edgelore validate                         # esquema (rompe CI) + desincronización (avisa)
 edgelore validate --max-age 365           # además: hechos que nadie reverifica desde hace un año
@@ -296,7 +297,8 @@ Dicho ahora y no dentro de tres meses:
 
 ## Estado
 
-v0.1. El núcleo curado está completo y probado (`npm test`, 172 pruebas).
+v0.1. El núcleo curado está completo y probado (`npm test`, 176 pruebas en
+Linux, Windows y macOS).
 
 El formato distingue el origen de cada arista (`human`, `rule:`, `import:`,
 `extractor:`) precisamente para poder poblarlo por varias vías sin perder de
