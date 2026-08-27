@@ -82,7 +82,7 @@ const COMMANDS = {
   stats: { run: cmdStats, help: 'Cobertura del indice.' },
   kinds: { run: cmdKinds, help: 'Tipos de nodo declarados por las reglas activas.' },
   checklist: { run: cmdChecklist, help: 'Comprobaciones manuales asociadas a un kind.' },
-  hook: { run: cmdHook, help: 'Uso interno: hook PostToolUse de Claude Code.' },
+  hook: { run: cmdHook, help: 'Uso interno: hooks PreToolUse y PostToolUse de Claude Code.' },
 };
 
 function help() {
