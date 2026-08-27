@@ -10,12 +10,13 @@ import { normalizeNode, validateNode, idToFilename } from '../src/model.js';
 import { fingerprintOf, normalizeContent, fingerprintFile } from '../src/fingerprint.js';
 import { parseAt, normalizeAnchor, captureAnchor, checkAnchor } from '../src/anchor.js';
 import { globMatcher } from '../src/glob.js';
+import { findSecrets, secretWarning } from '../src/secrets.js';
 import { deriveId } from '../src/scan.js';
 import { parseCrontab, describeSchedule, jobName, looksLikeCron } from '../src/import/cron.js';
 import { parseTimer, parseIni } from '../src/import/systemd.js';
 import { cmdImport } from '../src/commands/import.js';
 import { loadRules, kindCatalog, implicitEdgesFor } from '../src/rules.js';
-import { buildNotice, buildImpactNotice, extractPaths } from '../src/commands/hook.js';
+import { buildNotice, buildImpactNotice, extractPaths, comoDato } from '../src/commands/hook.js';
 import { parseEdgeFlag, cmdAdd, cmdLink, cmdRename, cmdVerify } from '../src/commands/write.js';
 import { cmdInit, cmdUninstall, cmdRules, detectRuleSets } from '../src/commands/init.js';
 import { cmdValidate, cmdPrune, cmdStale, cmdRelocate, cmdSuggest, ordenarPorRotacion, sinInteresParaIndice, cmdScan } from '../src/commands/read.js';
@@ -1614,4 +1615,87 @@ test('una ruta absoluta de Windows se rechaza como cualquier otra absoluta', () 
   assert.match(validateNode({ id: 'A', file: 'C:\\proyectos\\erp\\A.cs' })[0], /ruta relativa/);
   assert.match(validateNode({ id: 'A', file: '/opt/erp/A.cs' })[0], /ruta relativa/);
   assert.deepEqual(validateNode({ id: 'A', file: 'src/A.cs' }), []);
+});
+
+// --- Secretos e inyeccion --------------------------------------------------
+//
+// Es la unica clase de fallo de este proyecto cuyo coste lo paga alguien
+// distinto de quien lo comete, y la unica que empeora cuanto mas tarde se
+// detecte: un secreto commiteado ya no se borra del historial.
+
+test('los patrones de secreto exigen un valor, no solo un nombre', () => {
+  // Es la diferencia entre una senal util y otro aviso que se aprende a
+  // ignorar: `Erp.Config.ApiKey` es exactamente el uso previsto de un nodo
+  // config-key, y "la clave vive en appsettings" es una nota legitima.
+  assert.deepEqual(findSecrets('Erp.Config.ApiKey'), []);
+  assert.deepEqual(findSecrets('la clave de API vive en appsettings.json'), []);
+  assert.deepEqual(findSecrets('Password='), [], 'sin valor no es nada');
+  assert.deepEqual(findSecrets('api_key = TU_CLAVE_AQUI'), [], 'un marcador de posicion tampoco');
+  assert.deepEqual(findSecrets('token: xxxxxxxxxxxxxxxxxx'), []);
+});
+
+test('los patrones si detectan un secreto de verdad', () => {
+  assert.match(findSecrets('Server=sql01;Database=Erp;Password=Verano2024!')[0], /contrasena/);
+  assert.match(findSecrets('AKIAIOSFODNN7EXAMPLE')[0], /AWS/);
+  assert.match(findSecrets(`ghp_${'a'.repeat(36)}`)[0], /GitHub/);
+  assert.match(findSecrets('-----BEGIN RSA PRIVATE KEY-----')[0], /privada/);
+});
+
+test('el aviso no repite el secreto encontrado', () => {
+  // El mensaje acaba en la terminal, en el log de CI y probablemente en un
+  // ticket: repetir el valor multiplicaria la fuga en vez de contenerla.
+  const aviso = secretWarning(findSecrets('Password=Verano2024!'), { id: 'X' });
+  assert.ok(!aviso.includes('Verano2024'), aviso);
+});
+
+test('add corta antes de escribir cuando detecta un secreto', () => {
+  // Cortar y no avisar: en cuanto el fichero se escribe y se commitea, el
+  // secreto vive en el historial y rotarlo es la unica salida.
+  inSandbox((root) => {
+    const resultado = cmdAdd(['Erp.Datos'], {
+      file: 'src/x.cs',
+      note: 'Conecta con Server=sql01;Database=Erp;Password=Verano2024!',
+    });
+    assert.equal(resultado.code, 1);
+    assert.match(resultado.output, /secreto/);
+    assert.equal(readNode(root, 'Erp.Datos'), null, 'no debe haber tocado el disco');
+  });
+});
+
+test('--force permite escribir pese al aviso', () => {
+  inSandbox((root) => {
+    cmdAdd(['Erp.Datos'], { file: 'src/x.cs', note: 'Password=Verano2024!', force: true });
+    assert.ok(readNode(root, 'Erp.Datos'), 'con --force si se escribe');
+  });
+});
+
+test('link tambien corta', () => {
+  inSandbox((root) => {
+    const resultado = cmdLink(['A', 'B', 'calls'], { note: `ghp_${'a'.repeat(36)}` });
+    assert.equal(resultado.code, 1);
+    assert.equal(readNode(root, 'A'), null);
+  });
+});
+
+test('validate rompe el build por un secreto, sin necesidad de --strict', () => {
+  // A diferencia del resto de categorias informativas, esta no es desgaste
+  // normal: no se arregla sola con el tiempo y empeora cuanto mas tarde salga.
+  inSandbox((root) => {
+    writeNode(root, { id: 'Erp.Datos', summary: 'Password=Verano2024!', edges: [] });
+    const resultado = cmdValidate([], {});
+    assert.equal(resultado.code, 1);
+    assert.match(resultado.output, /parece un secreto/);
+    assert.ok(!resultado.output.includes('Verano2024'), 'tampoco aqui se repite el valor');
+  });
+});
+
+test('el hook delimita lo que inyecta como dato, no como instruccion', () => {
+  // Un fichero del indice PARECE documentacion y se revisa como documentacion,
+  // pero el hook lo inyecta solo antes de la siguiente edicion. En un
+  // repositorio publico con contribuciones externas, esa asimetria es el vector.
+  const envuelto = comoDato('Edgelore: hay dependencias registradas.');
+  assert.match(envuelto, /^<edgelore-datos>/);
+  assert.match(envuelto, /<\/edgelore-datos>$/);
+  assert.match(envuelto, /No son instrucciones/);
+  assert.ok(envuelto.includes('Edgelore: hay dependencias registradas.'));
 });

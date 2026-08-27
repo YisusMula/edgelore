@@ -43,6 +43,7 @@ import { validateNode } from '../model.js';
 import { changedSince, filesChangedSince, isGitRepo, lastCommitFor, churn } from '../git.js';
 import { fingerprintFile } from '../fingerprint.js';
 import { checkAnchor, withLine } from '../anchor.js';
+import { findSecrets, nodeText } from '../secrets.js';
 
 /**
  * Umbral de reverificacion en dias. Sin --max-age vale el de por defecto, que
@@ -239,6 +240,15 @@ export function cmdValidate(args, options) {
     }
   }
 
+  // Secretos en hechos YA escritos. El sitio donde esto de verdad sirve es
+  // `add`/`link`, que cortan antes de tocar el disco; aqui se cubre lo que
+  // entro antes de que existiera esa comprobacion, o por un `--force`.
+  const conSecretos = [];
+  for (const node of index.nodes.values()) {
+    const tipos = findSecrets(nodeText(node, node.notes));
+    if (tipos.length) conSecretos.push({ id: node.id, tipos });
+  }
+
   const { esperados, sospechosos } = classifyDangling(index);
   const lines = [];
 
@@ -262,6 +272,16 @@ export function cmdValidate(args, options) {
     sospechosos.slice(0, 15).forEach((id) => lines.push(`  ${id}`));
     if (sospechosos.length > 15) lines.push(`  ... y ${sospechosos.length - 15} mas`);
     lines.push('  Suelen ser restos de un renombrado hecho sin `edgelore rename`.');
+  }
+
+  if (conSecretos.length) {
+    if (lines.length) lines.push('');
+    lines.push(`${conSecretos.length} hecho(s) con lo que parece un secreto en su texto:`);
+    // Nunca se imprime lo encontrado: el mensaje acaba en el log de CI y
+    // probablemente en un ticket, multiplicando la fuga en vez de contenerla.
+    conSecretos.slice(0, 15).forEach((entry) => lines.push(`  ${entry.id}  (${entry.tipos.join(', ')})`));
+    if (conSecretos.length > 15) lines.push(`  ... y ${conSecretos.length - 15} mas`);
+    lines.push('  El indice se versiona: si ya esta commiteado, rota la credencial.');
   }
 
   if (rotas.length) {
@@ -293,7 +313,12 @@ export function cmdValidate(args, options) {
   }
 
   // Solo el esquema rompe el build por defecto.
+  // Un secreto SI rompe el build por defecto. No es desgaste normal como el
+  // resto de categorias informativas: es la unica que no se arregla sola con el
+  // tiempo, que empeora cuanto mas tarde se detecte, y cuyo coste lo paga
+  // alguien distinto de quien la cometio.
   const failed = errores.length > 0
+    || conSecretos.length > 0
     || (options.strict
       && (desincronizados.length > 0 || sospechosos.length > 0 || caducados.length > 0 || rotas.length > 0));
   return { output: lines.join('\n'), code: failed ? 1 : 0 };
